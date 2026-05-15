@@ -1,0 +1,25 @@
+{
+  "overview": "CryptoMarket P2P is a decentralized peer-to-peer crypto marketplace on the Internet Computer, supporting USDT/USDC stablecoin payments across TRC20, BEP20, ERC20, SPL, Polygon, and Avalanche networks. It features trustless escrow, shipping integrations with Ukrainian carriers, and a reputation system.",
+  "features": [
+    "P2P listings with stablecoin payments (USDT/USDC)",
+    "Trustless escrow with dispute resolution and jury voting",
+    "Nova Poshta, Ukrposhta, and Meest shipping integration with real TTN creation",
+    "Digital goods delivery with 24h inspection period",
+    "Reputation system with progressive trade limits and liability tracking",
+    "Crypto address verification via blockchain API calls (Level 2 on-chain check)",
+    "Internet Identity authentication",
+    "Ukrainian and English language support"
+  ],
+  "category": "marketplace",
+  "tags": [
+    "p2p",
+    "crypto",
+    "marketplace",
+    "stablecoins",
+    "escrow",
+    "icp",
+    "defi",
+    "ukraine"
+  ],
+  "last_updated": "2026-04-22T23:52:26.784Z"
+}

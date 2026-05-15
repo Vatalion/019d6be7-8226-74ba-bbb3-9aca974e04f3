@@ -1,0 +1,30 @@
+{
+  "regions": [
+    { "name": "Vinnytska oblast", "cities": ["Vinnytsia", "Koziatyn", "Mohyliv-Podilskyi", "Bershad", "Haisyn", "Tulchyn"] },
+    { "name": "Volynska oblast", "cities": ["Lutsk", "Novovolynsk", "Kovel", "Volodymyr", "Liuboml"] },
+    { "name": "Dnipropetrovska oblast", "cities": ["Dnipro", "Kryvyi Rih", "Kamianske", "Nikopol", "Pavlohrad", "Zhovti Vody", "Verkhnodniprovsk"] },
+    { "name": "Donetska oblast", "cities": ["Mariupol", "Kramatorsk", "Sloviansk", "Bakhmut", "Pokrovsk", "Kostiantynivka"] },
+    { "name": "Zhytomyrska oblast", "cities": ["Zhytomyr", "Berdychiv", "Korosten", "Novograd-Volynsky", "Malyn"] },
+    { "name": "Zakarpatska oblast", "cities": ["Uzhhorod", "Mukachevo", "Khust", "Berehove", "Vynohradiv"] },
+    { "name": "Zaporizka oblast", "cities": ["Zaporizhzhia", "Melitopol", "Berdiansk", "Enerhodar", "Tokmak"] },
+    { "name": "Ivano-Frankivska oblast", "cities": ["Ivano-Frankivsk", "Kolomyia", "Kalush", "Bolekhiv", "Kosiv", "Dolyna"] },
+    { "name": "Kyivska oblast", "cities": ["Boryspil", "Brovary", "Bila Tserkva", "Fastiv", "Irpin", "Bucha", "Vasylkiv"] },
+    { "name": "Kirovohradska oblast", "cities": ["Kropyvnytskyi", "Oleksandriia", "Svitlovodsk", "Znamianka", "Holovanivsk"] },
+    { "name": "Luhanska oblast", "cities": ["Severodonetsk", "Lysychansk", "Rubizhne", "Stakhanov", "Alchevsk"] },
+    { "name": "Lvivska oblast", "cities": ["Lviv", "Drohobych", "Stryi", "Boryslav", "Zolochiv", "Sambir", "Truskavets", "Zhydachiv"] },
+    { "name": "Mykolaivska oblast", "cities": ["Mykolaiv", "Voznesensk", "Pervomaysk", "Bashtanka", "Yuzhnoukrainsk"] },
+    { "name": "Odeska oblast", "cities": ["Odesa", "Bilhorod-Dnistrovskyi", "Izmail", "Yuzhne", "Chornomorsk", "Podilsk"] },
+    { "name": "Poltavska oblast", "cities": ["Poltava", "Kremenchuk", "Lubny", "Myrhorod", "Hadiach", "Pyriatyn"] },
+    { "name": "Rivnenska oblast", "cities": ["Rivne", "Kostopil", "Korets", "Ostroh", "Sarny", "Dubno"] },
+    { "name": "Sumska oblast", "cities": ["Sumy", "Konotop", "Shostka", "Okhtyrka", "Romny", "Hlukhiv"] },
+    { "name": "Ternopilska oblast", "cities": ["Ternopil", "Chortkiv", "Kremenets", "Berezhany", "Husiatyn", "Zbarazh"] },
+    { "name": "Kharkivska oblast", "cities": ["Kharkiv", "Lozova", "Chuhuiv", "Izium", "Kupiansk", "Balakliya"] },
+    { "name": "Khersonska oblast", "cities": ["Kherson", "Nova Kakhovka", "Henichesk", "Kahovka"] },
+    { "name": "Khmelnytska oblast", "cities": ["Khmelnytskyi", "Kamianets-Podilskyi", "Shepetivka", "Slavuta", "Netishyn"] },
+    { "name": "Cherkaska oblast", "cities": ["Cherkasy", "Uman", "Zolotonosha", "Smila", "Kaniv", "Khrystynivka"] },
+    { "name": "Chernivets'ka oblast", "cities": ["Chernivtsi", "Khotyn", "Storozhynets", "Vyzhnytsia", "Zastavna"] },
+    { "name": "Chernihivska oblast", "cities": ["Chernihiv", "Nizhyn", "Pryluky", "Borzna", "Kozelets"] },
+    { "name": "Kyiv", "cities": ["Kyiv"] },
+    { "name": "Crimea", "cities": ["Simferopol", "Sevastopol", "Kerch", "Yevpatoria", "Feodosiia"] }
+  ]
+}

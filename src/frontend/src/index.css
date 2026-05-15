@@ -1,0 +1,302 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --font-display: "GeneralSans", sans-serif;
+    --font-body: "GeneralSans", sans-serif;
+    --font-mono: "GeistMono", monospace;
+    --radius: 0.5rem;
+
+    --background: 0.97 0 0;
+    --foreground: 0.15 0 0;
+    --card: 0.99 0 0;
+    --card-foreground: 0.12 0 0;
+    --popover: 0.99 0 0;
+    --popover-foreground: 0.12 0 0;
+
+    --primary: 0.42 0.08 255;
+    --primary-foreground: 0.98 0 0;
+
+    --secondary: 0.9 0.02 255;
+    --secondary-foreground: 0.2 0 0;
+    --muted: 0.88 0 0;
+    --muted-foreground: 0.55 0 0;
+
+    --accent: 0.75 0.15 90;
+    --accent-foreground: 0.98 0 0;
+
+    --destructive: 0.55 0.22 25;
+    --destructive-foreground: 0.98 0 0;
+
+    --border: 0.92 0.01 255;
+    --input: 0.92 0.01 255;
+    --ring: 0.42 0.08 255;
+
+    --chart-1: 0.65 0.22 40;
+    --chart-2: 0.6 0.12 185;
+    --chart-3: 0.4 0.07 227;
+    --chart-4: 0.83 0.19 84;
+    --chart-5: 0.77 0.19 70;
+
+    --verified: 0.62 0.15 145;
+    --pending-verification: 0.68 0.16 80;
+    --warning-verification: 0.55 0.18 25;
+
+    --sidebar: 0.97 0 0;
+    --sidebar-foreground: 0.15 0 0;
+    --sidebar-primary: 0.42 0.08 255;
+    --sidebar-primary-foreground: 0.98 0 0;
+    --sidebar-accent: 0.88 0 0;
+    --sidebar-accent-foreground: 0.2 0 0;
+    --sidebar-border: 0.92 0.01 255;
+    --sidebar-ring: 0.42 0.08 255;
+  }
+
+  .dark {
+    --background: 0.145 0 0;
+    --foreground: 0.92 0 0;
+    --card: 0.18 0 0;
+    --card-foreground: 0.92 0 0;
+    --popover: 0.22 0 0;
+    --popover-foreground: 0.92 0 0;
+
+    --primary: 0.52 0.08 255;
+    --primary-foreground: 0.145 0 0;
+
+    --secondary: 0.22 0 0;
+    --secondary-foreground: 0.82 0 0;
+    --muted: 0.22 0 0;
+    --muted-foreground: 0.52 0 0;
+
+    --accent: 0.72 0.18 145;
+    --accent-foreground: 0.145 0 0;
+
+    --destructive: 0.65 0.19 22;
+    --destructive-foreground: 0.145 0 0;
+
+    --border: 0.25 0.02 255;
+    --input: 0.25 0.02 255;
+    --ring: 0.72 0.18 145;
+
+    --chart-1: 0.72 0.18 145;
+    --chart-2: 0.6 0.2 40;
+    --chart-3: 0.65 0.15 90;
+    --chart-4: 0.52 0.12 255;
+    --chart-5: 0.55 0.22 25;
+
+    --verified: 0.65 0.15 130;
+    --pending-verification: 0.72 0.18 90;
+    --warning-verification: 0.55 0.18 30;
+
+    --sidebar: 0.18 0 0;
+    --sidebar-foreground: 0.92 0 0;
+    --sidebar-primary: 0.52 0.08 255;
+    --sidebar-primary-foreground: 0.145 0 0;
+    --sidebar-accent: 0.22 0 0;
+    --sidebar-accent-foreground: 0.82 0 0;
+    --sidebar-border: 0.25 0.02 255;
+    --sidebar-ring: 0.72 0.18 145;
+  }
+
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-body antialiased;
+  }
+
+  /* Global focus-visible ring — WCAG AA keyboard nav */
+  :focus-visible {
+    outline: 2px solid oklch(var(--ring));
+    outline-offset: 2px;
+  }
+
+  /* Reduced motion — respect system preference */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer utilities {
+  /* ── Accessibility utilities ────────────────────────── */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+
+  .not-sr-only {
+    position: static;
+    width: auto;
+    height: auto;
+    padding: 0;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+  }
+
+  /* ── Motion utilities ───────────────────────────────── */
+  .transition-smooth {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .badge-tier-new {
+    @apply bg-muted text-muted-foreground rounded-full px-2 py-1 text-xs font-semibold uppercase tracking-wide;
+  }
+
+  .badge-tier-bronze {
+    @apply bg-orange-100 text-orange-900 dark:bg-orange-900 dark:text-orange-100 rounded-full px-2 py-1 text-xs font-semibold uppercase tracking-wide;
+  }
+
+  .badge-tier-silver {
+    @apply bg-slate-200 text-slate-900 dark:bg-slate-700 dark:text-slate-100 rounded-full px-2 py-1 text-xs font-semibold uppercase tracking-wide;
+  }
+
+  .badge-tier-gold {
+    @apply bg-yellow-100 text-yellow-900 dark:bg-yellow-900 dark:text-yellow-100 rounded-full px-2 py-1 text-xs font-semibold uppercase tracking-wide;
+  }
+
+  .status-badge-pending {
+    @apply inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-muted text-muted-foreground;
+  }
+
+  .status-badge-funded {
+    @apply inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-blue-500/20 text-blue-700 dark:text-blue-200;
+  }
+
+  .status-badge-confirmed {
+    @apply inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-green-500/20 text-green-700 dark:text-green-200;
+  }
+
+  .status-badge-dispute {
+    @apply inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-red-500/20 text-red-700 dark:text-red-200;
+  }
+
+  .token-chip {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-secondary/80 text-secondary-foreground font-mono text-sm border border-white/20;
+  }
+
+  .card-elevated {
+    @apply rounded-lg border border-border bg-card shadow-sm hover:shadow-md transition-shadow;
+  }
+
+  .input-primary {
+    @apply px-4 py-2 rounded-md border border-input bg-background text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent;
+  }
+
+  .button-primary {
+    @apply px-4 py-2 rounded-md bg-accent text-accent-foreground font-medium hover:opacity-90 active:opacity-80 transition-opacity;
+  }
+
+  .button-secondary {
+    @apply px-4 py-2 rounded-md border border-border bg-background text-foreground hover:bg-muted transition-colors;
+  }
+
+  .text-caption {
+    @apply text-xs text-muted-foreground;
+  }
+
+  .text-label {
+    @apply text-sm font-semibold text-foreground;
+  }
+
+  .verification-indicator {
+    @apply inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium border border-border;
+  }
+
+  .verification-pending {
+    background-color: oklch(var(--pending-verification) / 0.1);
+    color: oklch(var(--pending-verification));
+    border-color: oklch(var(--pending-verification) / 0.35);
+  }
+
+  .verification-verified {
+    background-color: oklch(var(--verified) / 0.1);
+    color: oklch(var(--verified));
+    border-color: oklch(var(--verified) / 0.35);
+  }
+
+  .verification-failed {
+    @apply bg-destructive/10 text-destructive border-destructive/30;
+  }
+
+  .jury-vote-card {
+    @apply relative p-4 rounded-lg border border-border bg-card hover:shadow-md transition-shadow cursor-pointer;
+  }
+
+  .jury-vote-card-active {
+    @apply border-accent bg-accent/5;
+  }
+
+  .carrier-card {
+    @apply p-4 rounded-lg border border-border bg-card flex flex-col gap-3;
+  }
+
+  .carrier-metric {
+    @apply flex justify-between items-center text-sm;
+  }
+
+  .metric-chart-container {
+    @apply w-full h-64 p-4 rounded-lg border border-border bg-card;
+  }
+
+  .pulse-subtle {
+    animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+}
+
+@font-face {
+  font-family: "GeneralSans";
+  src: url("/assets/fonts/GeneralSans.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "GeneralSans";
+  src: url("/assets/fonts/GeneralSans.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "GeistMono";
+  src: url("/assets/fonts/GeistMono.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Figtree";
+  src: url("/assets/fonts/Figtree.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Figtree";
+  src: url("/assets/fonts/Figtree.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}

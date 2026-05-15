@@ -1,0 +1,761 @@
+// Version: 1.0.0
+type AddressVerification__377070101 =
+  {
+    active : Bool;
+    expiresAt : Timestamp__695951621;
+    level : Nat;
+    txCount : Nat;
+    verifiedAt : Timestamp__695951621
+  };
+type AuditEntry__885200190 =
+  {
+    action : Text;
+    actorId : Principal;
+    details : Text;
+    id : Nat;
+    targetId : ?Text;
+    timestamp : Timestamp__695951621
+  };
+type BalanceCacheKey__597755185 = Text;
+type BalanceResult__306498354 =
+  {
+    chain : ChainType__695492010;
+    error : ?Text;
+    lastChecked : Int;
+    usdcBalance : Nat;
+    usdtBalance : Nat
+  };
+type CacheKey__560899057 = Text;
+type ChainType__695492010 =
+  {#Avalanche; #BEP20; #ERC20; #Polygon; #SPL; #TRC20};
+type ComplianceNote__65222989 =
+  {
+    actorId : Principal;
+    id : Nat;
+    note : Text;
+    timestamp : Timestamp__695951621
+  };
+type Data__159895909<T> = {var count : Nat__490723111; elements : [var ?T]};
+type Data__791452850<K, V> =
+  {var count : Nat__490723111; kvs : [var ?(K, V)]};
+type DigitalDelivery__519390239 =
+  {
+    fileHash : ?Text;
+    fileUrl : Text;
+    inspectionDeadline : ?Timestamp__695951621;
+    password : ?Text;
+    revealedAt : ?Timestamp__695951621
+  };
+type DisputeId__297616659 = Nat;
+type DisputeReason__704698033 =
+  {
+    #item_damaged;
+    #item_differs;
+    #item_not_received;
+    #other;
+    #seller_unresponsive
+  };
+type DisputeResolution__416125867 =
+  {
+    notes : Text;
+    outcome : ResolutionOutcome__340214615;
+    resolvedBy : UserId__502046176
+  };
+type DisputeStatus__90841745 =
+  {#escalated_to_admin; #opened; #resolved; #under_review};
+type Dispute__1004071245 =
+  {
+    createdAt : Timestamp__695951621;
+    var description : Text;
+    var evidenceAttachments : [MediaAttachment__754206879];
+    var evidenceUrls : [Text];
+    id : DisputeId__297616659;
+    initiator : UserId__502046176;
+    var moderatorNotes : [Text];
+    reason : DisputeReason__704698033;
+    var resolution : ?DisputeResolution__416125867;
+    var resolvedAt : ?Timestamp__695951621;
+    var status : DisputeStatus__90841745;
+    trade : TradeId__945931079
+  };
+type ErrorLogEntry__883554230 =
+  {
+    errorMessage : Text;
+    functionName : Text;
+    id : Nat;
+    moduleName : Text;
+    severity : ErrorSeverity__472584149;
+    timestamp : Int;
+    userPrincipal : ?Principal
+  };
+type ErrorSeverity__472584149 = {#critical; #error; #info; #warning};
+type EscrowAccount__494238177 =
+  {
+    amount : Nat;
+    buyerPrincipal : UserId__502046176;
+    deadline : Timestamp__695951621;
+    fee : Nat;
+    ledgerCanisterId : Principal;
+    lockedAt : Timestamp__695951621;
+    sellerPrincipal : UserId__502046176;
+    token : TradeToken__514551119;
+    tradeId : TradeId__945931079
+  };
+type FeeRecord__691510363 =
+  {
+    amount : Nat;
+    recordedAt : Timestamp__695951621;
+    token : TradeToken__514551119;
+    tradeId : TradeId__945931079
+  };
+type FeedbackId__990397315 = Nat;
+type Feedback__99016138 =
+  {
+    comment : Text;
+    createdAt : Timestamp__695951621;
+    id : FeedbackId__990397315;
+    rating : Nat;
+    reviewed : UserId__502046176;
+    reviewer : UserId__502046176;
+    trade : TradeId__945931079
+  };
+type HttpHeader__950506635 = {name : Text; value : Text};
+type HttpRequestArgs__260016812 =
+  {
+    body : ?Blob;
+    headers : [HttpHeader__950506635];
+    max_response_bytes : ?Nat64;
+    method : {#get; #head; #post};
+    transform :
+      ?{
+         context : Blob;
+         function :
+           shared query {context : Blob; response : HttpResponse__164242434} ->
+             async HttpResponse__164242434
+       };
+    url : Text
+  };
+type HttpResponse__164242434 =
+  {body : Blob; headers : [HttpHeader__950506635]; status : Nat};
+type Int__270357528 = Int__616954475;
+type Int__616954475 = Int;
+type Internal__667636161<T> =
+  {children : [var ?Node__92254746<T>]; data : Data__159895909<T>};
+type Internal__8484328<K, V> =
+  {children : [var ?Node__46230540<K, V>]; data : Data__791452850<K, V>};
+type ItemCondition__472446580 = {#fair; #good; #likeNew; #new_; #poor};
+type JurorEntry__120479296 =
+  {
+    var activeDisputeIds : [Text];
+    principal : Principal;
+    var registeredAt : Timestamp__695951621;
+    var resolvedCount : Nat;
+    stakedAmount : Float;
+    var successRate : Float
+  };
+type JurorVoteChoice__637249016 = {#buyerWins; #sellerWins};
+type JurorVote__380160827 =
+  {
+    jurorPrincipal : Principal;
+    reasoning : Text;
+    timestamp : Int;
+    vote : JurorVoteChoice__637249016
+  };
+type JuryAssignment__416836285 =
+  {
+    var deadline : Timestamp__695951621;
+    disputeId : DisputeId__297616659;
+    var jurorIds : [Principal];
+    var votes : [JurorVote__380160827]
+  };
+type Leaf__520550824<T> = {data : Data__159895909<T>};
+type Leaf__809889148<K, V> = {data : Data__791452850<K, V>};
+type LiabilityEvent__826122740 =
+  {
+    amount : Int;
+    reason : Text;
+    timestamp : Timestamp__695951621;
+    tradeId : ?Nat
+  };
+type LinkPreview__629741041 =
+  {
+    description : ?Text;
+    fetchedAt : Timestamp__695951621;
+    imageUrl : ?Text;
+    siteName : ?Text;
+    title : ?Text;
+    url : Text
+  };
+type List__415060402<T> = List__790383201<T>;
+type List__790383201<T> =
+  {
+    var blockIndex : Nat__490723111;
+    var blocks : [var [var ?T]];
+    var elementIndex : Nat__490723111
+  };
+type ListingCategory__791411784 =
+  {#books; #clothing; #digital; #electronics; #other; #services};
+type ListingId__1026456513 = Nat;
+type ListingStatus__958338505 = {#active; #inactive; #removed; #sold};
+type Listing__866675724 =
+  {
+    var category : ListingCategory__791411784;
+    var condition : ItemCondition__472446580;
+    createdAt : Timestamp__695951621;
+    var description : Text;
+    var digitalFileHash : ?Text;
+    var digitalFileUrl : ?Text;
+    var digitalPassword : ?Text;
+    var expiresAt : Timestamp__695951621;
+    id : ListingId__1026456513;
+    isDigital : Bool;
+    var location : Text;
+    var meestConfig : ?MeestConfig__61637230;
+    var novaPoshtaConfig : ?NovaPoshtaConfig__372985589;
+    var packageDetails : ?PackageDetails__1001502407;
+    var photos : [Text];
+    var priceAmount : Nat;
+    var priceToken : TradeToken__514551119;
+    var resolvedAt : ?Timestamp__695951621;
+    seller : UserId__502046176;
+    var shippingMethods : [ShippingMethod__949987331];
+    var status : ListingStatus__958338505;
+    var title : Text;
+    var ukrposhtaConfig : ?UkrposhtaConfig__732042166;
+    var viewCount : Nat
+  };
+type Map__158565046<K, V> = Map__297112838<K, V>;
+type Map__297112838<K, V> =
+  {var root : Node__46230540<K, V>; var size : Nat__490723111};
+type Map__605269027<K, V> = Map__158565046<K, V>;
+type MediaAttachment__754206879 =
+  {fileName : Text; fileSize : Nat; mimeType : Text; url : Text};
+type MeestConfig__61637230 =
+  {deliveryTypes : [Text]; enabled : Bool; senderPudoRef : ?Text};
+type MessageId__439296426 = Nat;
+type Message__445843841 =
+  {
+    attachmentUrl : ?Text;
+    attachments : [MediaAttachment__754206879];
+    content : Text;
+    id : MessageId__439296426;
+    sender : UserId__502046176;
+    sentAt : Timestamp__695951621;
+    trade : TradeId__945931079
+  };
+type ModuleMetrics__158251858 =
+  {
+    var cyclesConsumed : Nat;
+    var errorCount : Nat;
+    var lastUpdated : Int;
+    var memoryUsedBytes : Nat;
+    moduleName : Text;
+    var requestCount : Nat
+  };
+type Nat__490723111 = Nat__920180692;
+type Nat__920180692 = Nat;
+type Node__46230540<K, V> =
+  {#internal : Internal__8484328<K, V>; #leaf : Leaf__809889148<K, V>};
+type Node__585180226<T> =
+  {
+    var next : ?Node__585180226<T>;
+    var previous : ?Node__585180226<T>;
+    value : T
+  };
+type Node__92254746<T> =
+  {#internal : Internal__667636161<T>; #leaf : Leaf__520550824<T>};
+type NotificationEvent__316737583 =
+  {
+    eventType : Text;
+    id : Nat;
+    message : Text;
+    read : Bool;
+    timestamp : Timestamp__695951621;
+    tradeId : Nat
+  };
+type NovaPoshtaConfig__372985589 =
+  {deliveryTypes : [Text]; enabled : Bool; senderBranchRef : Text};
+type PackageDetails__1001502407 =
+  {
+    declaredValue : Nat;
+    height : Nat;
+    length : Nat;
+    places : Nat;
+    weight : Nat;
+    width : Nat
+  };
+type PaymentMethod__410998495 =
+  {
+    addedAt : Timestamp__695951621;
+    address : Text;
+    token : TradeToken__514551119;
+    verification : ?AddressVerification__377070101
+  };
+type PaymentVerificationError__316791236 =
+  {
+    network : Text;
+    reason : Text;
+    timestamp : Timestamp__695951621;
+    tradeId : TradeId__945931079;
+    txHash : Text
+  };
+type PaymentVerificationResult__111590355 =
+  {
+    blockNumber : Nat;
+    confirmedAmount : Float;
+    confirmedRecipient : Text;
+    errorReason : ?Text;
+    status : PaymentVerificationStatus__670642781;
+    txHash : Text
+  };
+type PaymentVerificationStatus__670642781 = {#failed; #pending; #verified};
+type ProposalId__737231926 = Nat;
+type ProposalStatus__817843250 =
+  {#active; #executed; #expired; #passed; #rejected};
+type ProposalType__873924838 =
+  {
+    #ParameterChange : {key : Text; value : Text};
+    #TextResolution : {description : Text};
+    #TreasuryTransfer : {amount : Nat; recipient : Principal}
+  };
+type Proposal__92099153 =
+  {
+    createdAt : Timestamp__695951621;
+    deadline : Timestamp__695951621;
+    description : Text;
+    var executedAt : ?Timestamp__695951621;
+    id : ProposalId__737231926;
+    var noVotes : Nat;
+    proposalType : ProposalType__873924838;
+    proposer : UserId__502046176;
+    var status : ProposalStatus__817843250;
+    voters : Map__605269027<UserId__502046176, Bool>;
+    var yesVotes : Nat
+  };
+type RateCacheEntry__494508653 = {fetchedAt : Int; rateInCents : Nat};
+type ReadKey__898272821 = (TradeId__945931079, UserId__502046176);
+type RequestMetric__857257983 =
+  {
+    durationMs : Nat;
+    endpoint : Text;
+    status : Nat;
+    timestamp : Timestamp__534842869
+  };
+type ResolutionOutcome__340214615 = {#buyer_wins; #seller_wins; #split};
+type Set__532252804<T> = Set__710576254<T>;
+type Set__710576254<T> =
+  {var root : Node__92254746<T>; var size : Nat__490723111};
+type ShipHttpHeader__519156817 = {name : Text; value : Text};
+type ShipHttpRequestArgs__941208248 =
+  {
+    body : ?Blob;
+    headers : [ShipHttpHeader__519156817];
+    max_response_bytes : ?Nat64;
+    method : {#get; #head; #post};
+    transform :
+      ?{
+         context : Blob;
+         function :
+           shared query {
+                          context : Blob;
+                          response : ShipHttpResponse__1019580168
+                        } ->
+             async ShipHttpResponse__1019580168
+       };
+    url : Text
+  };
+type ShipHttpResponse__1019580168 =
+  {body : Blob; headers : [ShipHttpHeader__519156817]; status : Nat};
+type ShippingCarrier__778542374 =
+  {#digital; #meest; #nova_poshta; #self_pickup; #ukrposhta};
+type ShippingMethod__949987331 =
+  {
+    carrier : ShippingCarrier__778542374;
+    estimatedDays : Nat;
+    type_ : ShippingServiceType__937592019
+  };
+type ShippingSelection__1028076487 =
+  {
+    address : ?Text;
+    branchRef : ?Text;
+    cost : Nat;
+    deliveryType : Text;
+    provider : Text
+  };
+type ShippingServiceType__937592019 = {#express; #standard};
+type TTNStatus__564284568 = {#Failed; #InProgress; #Pending; #Success};
+type Time__796480547 = Int__270357528;
+type Time__900049286 = Time__796480547;
+type Timestamp__534842869 = Int;
+type Timestamp__695951621 = Time__900049286;
+type TradeId__945931079 = Nat;
+type TradeStatus__3667517 =
+  {
+    #awaiting_approval;
+    #buyer_confirmed;
+    #cancelled;
+    #complete;
+    #disputed;
+    #funded;
+    #payment_verified;
+    #pending;
+    #refunded
+  };
+type TradeToken__514551119 =
+  {
+    #USDC_AVAX;
+    #USDC_ERC20;
+    #USDC_POLYGON;
+    #USDC_SPL;
+    #USDT_AVAX;
+    #USDT_BEP20;
+    #USDT_ERC20;
+    #USDT_POLYGON;
+    #USDT_TRC20;
+    #ckUSDC;
+    #ckUSDT
+  };
+type Trade__39771533 =
+  {
+    amount : Nat;
+    buyer : UserId__502046176;
+    var completedAt : ?Timestamp__695951621;
+    var confirmedAt : ?Timestamp__695951621;
+    createdAt : Timestamp__695951621;
+    var digitalDelivery : ?DigitalDelivery__519390239;
+    var escrowAccount : ?EscrowAccount__494238177;
+    var fundedAt : ?Timestamp__695951621;
+    id : TradeId__945931079;
+    listing : ListingId__1026456513;
+    var refundDeadline : ?Timestamp__695951621;
+    seller : UserId__502046176;
+    var shippingSelection : ?ShippingSelection__1028076487;
+    var status : TradeStatus__3667517;
+    token : TradeToken__514551119;
+    var ttnCreationStatus : TTNStatus__564284568;
+    var ttnNumber : ?Text
+  };
+type TrustLevel__231490673 = {#bronze; #gold; #new_; #silver};
+type UkrposhtaConfig__732042166 =
+  {deliveryTypes : [Text]; enabled : Bool; senderOfficeRef : ?Text};
+type UserId__502046176 = Principal;
+type UserRole__203834362 = {#admin; #moderator; #user};
+type User__1001603178 =
+  {
+    var avatarUrl : Text;
+    var bio : Text;
+    createdAt : Timestamp__695951621;
+    id : UserId__502046176;
+    var isBanned : Bool;
+    var liabilityBalance : Int;
+    var liabilityHistory : [LiabilityEvent__826122740];
+    var paymentMethods : [PaymentMethod__410998495];
+    var reputationScore : Int;
+    var role : UserRole__203834362;
+    var suspendedUntil : ?Timestamp__695951621;
+    var trustLevel : TrustLevel__231490673;
+    var username : Text
+  };
+type VaultAddress__804712695 =
+  {
+    address : Text;
+    chain : ChainType__695492010;
+    derivationPath : [Blob];
+    derivedAt : Int;
+    network : Text;
+    tokenSymbol : Text
+  };
+type WithdrawalRecord__169873694 =
+  {
+    amount : Nat;
+    executedAt : Timestamp__695951621;
+    id : Nat;
+    proposalId : Nat;
+    recipient : Principal
+  };
+actor {
+  stable ADDRESS_VERIFY_TTL_NS : Int;
+  stable INSPECTION_PERIOD_NS : Int;
+  stable LINK_PREVIEW_TTL_NS : Int;
+  stable MAX_NOTIFICATIONS : Nat;
+  stable MAX_URL_LENGTH : Nat;
+  stable UNIFIED_CACHE_TTL : Int;
+  stable addressVerifyCache :
+    {
+      var root : Node__46230540<Text, AddressVerification__377070101>;
+      var size : Nat__490723111
+    };
+  stable auditLog :
+    {
+      var blockIndex : Nat__490723111;
+      var blocks : [var [var ?AuditEntry__885200190]];
+      var elementIndex : Nat__490723111
+    };
+  stable cancelProposals :
+    {
+      var root : Node__46230540<TradeId__945931079, Set__532252804<Principal>>;
+      var size : Nat__490723111
+    };
+  stable complianceNotes :
+    {
+      var root :
+        Node__46230540<UserId__502046176,
+                        List__415060402<ComplianceNote__65222989>>;
+      var size : Nat__490723111
+    };
+  stable disputes :
+    {
+      var root : Node__46230540<DisputeId__297616659, Dispute__1004071245>;
+      var size : Nat__490723111
+    };
+  stable errorLog :
+    {
+      var blockIndex : Nat__490723111;
+      var blocks : [var [var ?ErrorLogEntry__883554230]];
+      var elementIndex : Nat__490723111
+    };
+  stable feedbacks :
+    {
+      var root : Node__46230540<FeedbackId__990397315, Feedback__99016138>;
+      var size : Nat__490723111
+    };
+  stable govRateLimitMap :
+    {
+      var root : Node__46230540<Principal, (Nat, Timestamp__695951621)>;
+      var size : Nat__490723111
+    };
+  stable hexChars : [Char];
+  stable ic :
+    actor {
+      http_request :
+        shared HttpRequestArgs__260016812 -> async HttpResponse__164242434
+    };
+  stable jurors :
+    {
+      var root : Node__46230540<Principal, JurorEntry__120479296>;
+      var size : Nat__490723111
+    };
+  stable juryMap :
+    {
+      var root :
+        Node__46230540<DisputeId__297616659, JuryAssignment__416836285>;
+      var size : Nat__490723111
+    };
+  stable lastReadPtrs :
+    {
+      var root : Node__46230540<ReadKey__898272821, Timestamp__695951621>;
+      var size : Nat__490723111
+    };
+  stable linkPreviewCache :
+    {
+      var root : Node__46230540<Text, LinkPreview__629741041>;
+      var size : Nat__490723111
+    };
+  stable listings :
+    {
+      var root : Node__46230540<ListingId__1026456513, Listing__866675724>;
+      var size : Nat__490723111
+    };
+  stable messages :
+    {
+      var root : Node__46230540<MessageId__439296426, Message__445843841>;
+      var size : Nat__490723111
+    };
+  stable moduleMetrics :
+    {
+      var root : Node__46230540<Text, ModuleMetrics__158251858>;
+      var size : Nat__490723111
+    };
+  stable nextAuditId : {var value : Nat};
+  stable nextDisputeId : {var value : Nat};
+  stable nextErrorId : {var value : Nat};
+  stable nextFeedbackId : {var value : Nat};
+  stable nextListingId : {var value : Nat};
+  stable nextMessageId : {var value : Nat};
+  stable nextNoteId : {var value : Nat};
+  stable nextNotificationId : {var value : Nat};
+  stable nextProposalId : {var value : Nat};
+  stable nextTradeId : {var value : Nat};
+  stable nextWaybillSeed : {var value : Nat};
+  stable nextWithdrawalId : {var value : Nat};
+  stable notifications :
+    {
+      var root :
+        Node__46230540<Principal,
+                        List__415060402<NotificationEvent__316737583>>;
+      var size : Nat__490723111
+    };
+  stable objectStorageLiveBlobs :
+    {
+      var root : Node__46230540<Text, {createdAt : Int; hash : Text}>;
+      var size : Nat__490723111
+    };
+  stable objectStoragePendingDelete :
+    {var root : Node__92254746<Text>; var size : Nat__490723111};
+  stable paymentErrorLog :
+    {
+      var back : ?Node__585180226<PaymentVerificationError__316791236>;
+      var front : ?Node__585180226<PaymentVerificationError__316791236>;
+      var size : Nat__490723111
+    };
+  stable processingTrades :
+    {
+      var root : Node__46230540<TradeId__945931079, Bool>;
+      var size : Nat__490723111
+    };
+  stable proposals :
+    {
+      var blockIndex : Nat__490723111;
+      var blocks : [var [var ?Proposal__92099153]];
+      var elementIndex : Nat__490723111
+    };
+  stable rateCache :
+    {
+      var root :
+        Node__46230540<TradeToken__514551119, RateCacheEntry__494508653>;
+      var size : Nat__490723111
+    };
+  stable rateLimitAddEvidence :
+    {
+      var root : Node__46230540<Principal, (Nat, Timestamp__695951621)>;
+      var size : Nat__490723111
+    };
+  stable rateLimitConfirmPayment :
+    {
+      var root : Node__46230540<Principal, (Nat, Timestamp__695951621)>;
+      var size : Nat__490723111
+    };
+  stable rateLimitCreateListing :
+    {
+      var root : Node__46230540<Principal, (Nat, Timestamp__695951621)>;
+      var size : Nat__490723111
+    };
+  stable rateLimitInitiateTrade :
+    {
+      var root : Node__46230540<Principal, (Nat, Timestamp__695951621)>;
+      var size : Nat__490723111
+    };
+  stable rateLimitListingMutations :
+    {
+      var root : Node__46230540<Principal, (Nat, Timestamp__695951621)>;
+      var size : Nat__490723111
+    };
+  stable rateLimitOpenDispute :
+    {
+      var root : Node__46230540<Principal, (Nat, Timestamp__695951621)>;
+      var size : Nat__490723111
+    };
+  stable rateLimitSendMessage :
+    {
+      var root : Node__46230540<Principal, (Nat, Timestamp__695951621)>;
+      var size : Nat__490723111
+    };
+  stable rateLimitState :
+    {
+      var root : Node__46230540<Principal, (Nat, Timestamp__695951621)>;
+      var size : Nat__490723111
+    };
+  stable rateLimitVerify :
+    {
+      var root :
+        Node__46230540<TradeId__945931079, (Nat, Timestamp__695951621)>;
+      var size : Nat__490723111
+    };
+  stable requestLog :
+    {
+      var blockIndex : Nat__490723111;
+      var blocks : [var [var ?RequestMetric__857257983]];
+      var elementIndex : Nat__490723111
+    };
+  stable selfPrincipal : {var value : Principal};
+  stable shipIc :
+    actor {
+      http_request :
+        shared ShipHttpRequestArgs__941208248 ->
+          async ShipHttpResponse__1019580168
+    };
+  stable shippingCache :
+    {
+      var root : Node__46230540<Text, (Text, Timestamp__695951621)>;
+      var size : Nat__490723111
+    };
+  stable spamTracker :
+    {
+      var root : Node__46230540<UserId__502046176, Timestamp__695951621>;
+      var size : Nat__490723111
+    };
+  stable systemSettings :
+    {
+      var allowedTokens : [TradeToken__514551119];
+      var avalancheApiKey : Text;
+      var bscScanApiKey : Text;
+      var ckUsdcLedgerId : Text;
+      var ckUsdtLedgerId : Text;
+      var cyclesBalanceThreshold : Nat;
+      var errorRateThreshold : Float;
+      var infuraApiKey : Text;
+      var maxListingPriceUSD : Nat;
+      var meestApiKey : Text;
+      var minTradeAmountUSD : Nat;
+      var novaPoshtaApiKey : Text;
+      var paymentTimeoutHours : Nat;
+      var polygonApiKey : Text;
+      var solanaRpcUrl : Text;
+      var tronGridApiKey : Text;
+      var ukrPoshtaApiKey : Text
+    };
+  stable tradeIndex :
+    {
+      var root :
+        Node__46230540<TradeId__945931079,
+                        List__415060402<MessageId__439296426>>;
+      var size : Nat__490723111
+    };
+  stable trades :
+    {
+      var root : Node__46230540<TradeId__945931079, Trade__39771533>;
+      var size : Nat__490723111
+    };
+  stable treasuryFees :
+    {
+      var root : Node__46230540<TradeId__945931079, FeeRecord__691510363>;
+      var size : Nat__490723111
+    };
+  stable treasuryId : {var value : Principal};
+  stable treasuryWithdrawals :
+    {
+      var blockIndex : Nat__490723111;
+      var blocks : [var [var ?WithdrawalRecord__169873694]];
+      var elementIndex : Nat__490723111
+    };
+  stable userFeedbackIndex :
+    {
+      var root :
+        Node__46230540<UserId__502046176,
+                        List__415060402<FeedbackId__990397315>>;
+      var size : Nat__490723111
+    };
+  stable users :
+    {
+      var root : Node__46230540<UserId__502046176, User__1001603178>;
+      var size : Nat__490723111
+    };
+  stable vaultAddressCache :
+    {
+      var root : Node__46230540<CacheKey__560899057, VaultAddress__804712695>;
+      var size : Nat__490723111
+    };
+  stable vaultBalanceCache :
+    {
+      var root :
+        Node__46230540<BalanceCacheKey__597755185, BalanceResult__306498354>;
+      var size : Nat__490723111
+    };
+  stable verificationResults :
+    {
+      var root :
+        Node__46230540<TradeId__945931079,
+                        PaymentVerificationResult__111590355>;
+      var size : Nat__490723111
+    }
+};
