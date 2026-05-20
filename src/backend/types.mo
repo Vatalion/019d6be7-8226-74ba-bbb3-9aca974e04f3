@@ -203,6 +203,18 @@ module {
 
   // ─── Listing ──────────────────────────────────────────────────────────────
 
+  public type CategoryId = Nat;
+
+  /// OLX-aligned taxonomy node (static catalog in CategoryCatalog.mo).
+  public type CategoryNode = {
+    id : CategoryId;
+    parentId : ?CategoryId;
+    slug : Text;
+    labelUk : Text;
+    labelEn : Text;
+    legacyCategory : ListingCategory;
+  };
+
   public type ListingCategory = {
     #electronics;
     #clothing;
@@ -233,6 +245,7 @@ module {
     var title       : Text;
     var description : Text;
     var category    : ListingCategory;
+    var categoryId  : CategoryId;
     var priceAmount : Nat;
     var priceToken  : TradeToken;
     var condition   : ItemCondition;
@@ -249,9 +262,13 @@ module {
     var novaPoshtaConfig  : ?NovaPoshtaConfig;
     var ukrposhtaConfig   : ?UkrposhtaConfig;
     var meestConfig       : ?MeestConfig;
-     var digitalFileHash   : ?Text;   // SHA-256 hash for dispute evidence (optional)
-     var digitalPassword   : ?Text;   // Password revealed to buyer after payment (optional)
+     var digitalFileHash           : ?Text;   // SHA-256 hash for dispute evidence (optional)
+     var digitalPassword           : ?Text;   // Password revealed to buyer after payment (optional) — DEPRECATED, kept as fallback for pre-encryption data
+     var digitalFileUrlEncrypted   : ?Text;   // XOR-encrypted digitalFileUrl (hex-encoded). Preferred over plain digitalFileUrl.
+     var digitalPasswordEncrypted  : ?Text;   // XOR-encrypted digitalPassword (hex-encoded). Preferred over plain digitalPassword.
      var resolvedAt        : ?Timestamp;  // When listing entered resolved state (sold/deactivated/expired). null = active/reactivating
+    var bumpedAt          : Timestamp;   // Last bump — used for OLX-style refresh ordering
+    var promotedUntil     : ?Timestamp; // VIP/promoted window (admin)
   };
 
   /// Lightweight card for list views
@@ -270,8 +287,53 @@ module {
     condition        : ItemCondition;
     shippingMethods  : [ShippingMethod];
     category         : ListingCategory;
+    categoryId       : CategoryId;
+    categorySlug     : Text;
     createdAt        : Timestamp;
     digitalFileUrl   : Text;
+    isPromoted       : Bool;
+  };
+
+  // ─── Engagement (Phase B — OLX parity) ────────────────────────────────────
+
+  public type SavedSearchId = Nat;
+
+  public type SavedSearch = {
+    id         : SavedSearchId;
+    owner      : UserId;
+    name       : Text;
+    paramsJson : Text;
+    createdAt  : Timestamp;
+  };
+
+  public type ListingInquiryId = Nat;
+
+  public type ListingInquiry = {
+    id        : ListingInquiryId;
+    listingId : ListingId;
+    buyer     : UserId;
+    seller    : UserId;
+    createdAt : Timestamp;
+  };
+
+  public type ListingInquiryMessageId = Nat;
+
+  public type ListingInquiryMessage = {
+    id        : ListingInquiryMessageId;
+    inquiryId : ListingInquiryId;
+    sender    : UserId;
+    content   : Text;
+    createdAt : Timestamp;
+  };
+
+  /// Moderation report stored on-chain (Caffeine draft compatibility).
+  public type ListingReport = {
+    id        : Nat;
+    listingId : ListingId;
+    reporter  : UserId;
+    reason    : Text;
+    details   : Text;
+    createdAt : Timestamp;
   };
 
   // ─── Digital delivery ─────────────────────────────────────────────────────

@@ -1,12 +1,6 @@
 import { createActor } from "@/backend";
 import type { ListingCard } from "@/backend.d";
-import {
-  ItemCondition,
-  type ListingCategory,
-  type ShippingCarrier,
-  type TradeToken,
-  TrustLevel,
-} from "@/backend.d";
+import { type TradeToken, TrustLevel } from "@/backend.d";
 import type { FilterState } from "@/components/marketplace/FilterPanel";
 import { FilterPanel } from "@/components/marketplace/FilterPanel";
 import { SearchBar } from "@/components/marketplace/SearchBar";
@@ -24,7 +18,7 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useActor } from "@caffeineai/core-infrastructure";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import {
   ChevronRight,
   MapPin,
@@ -33,29 +27,21 @@ import {
   Star,
   X,
 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { searchListingsWithCategory } from "@/lib/marketplaceActor";
+import { SavedSearchesPanel } from "@/components/marketplace/SavedSearchesPanel";
+import { categoryLabel, getCategoryById } from "@/data/olxCategories";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocale } from "../hooks/useLocale";
+import {
+  EMPTY_FILTERS,
+  type SortKey,
+  filtersEqual,
+  filtersToListingsSearch,
+  listingsSearchFromRoute,
+} from "../lib/listingsSearch";
 
 const PAGE_SIZE = 12;
-
-type SortKey = "newest" | "price-asc" | "price-desc";
-
-/** 4 approved token values for URL deserialization validation */
-const APPROVED_TOKENS = new Set<string>([
-  "USDT_TRC20",
-  "USDT_BEP20",
-  "USDT_ERC20",
-  "USDC_ERC20",
-]);
-
-const EMPTY_FILTERS: FilterState = {
-  categories: [],
-  conditions: [],
-  carriers: [],
-  priceMin: "",
-  priceMax: "",
-  token: null,
-};
+const listingsRouteApi = getRouteApi("/listings");
 
 const TOKEN_COLORS: Record<string, string> = {
   USDT_TRC20:
@@ -87,80 +73,6 @@ function formatPrice(amount: bigint, _token: TradeToken): string {
   return `$${(n / 1_000_000).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-// ── URL ↔ FilterState serialisation ─────────────────────────────────────────
-
-function filtersToSearchParams(
-  filters: FilterState,
-  sort: SortKey,
-  query: string,
-): URLSearchParams {
-  const sp = new URLSearchParams();
-  if (query) sp.set("q", query);
-  if (sort !== "newest") sp.set("sort", sort);
-  // Single-select: still comma-join for forward compatibility, but will only
-  // ever produce 0 or 1 values from the radio-button UI.
-  if (filters.categories.length > 0)
-    sp.set("category", filters.categories.join(","));
-  if (filters.conditions.length > 0)
-    sp.set("condition", filters.conditions.join(","));
-  if (filters.carriers.length > 0)
-    sp.set("shipping", filters.carriers.join(","));
-  if (filters.priceMin) sp.set("priceMin", filters.priceMin);
-  if (filters.priceMax) sp.set("priceMax", filters.priceMax);
-  // Token serialization: only set if not null
-  if (filters.token !== null) sp.set("token", String(filters.token));
-  return sp;
-}
-
-function searchParamsToFilters(sp: URLSearchParams): {
-  filters: FilterState;
-  sort: SortKey;
-  query: string;
-} {
-  const categoriesRaw = sp.get("category") ?? "";
-  const conditionsRaw = sp.get("condition") ?? "";
-  const shippingRaw = sp.get("shipping") ?? "";
-
-  // Only include valid enum values to avoid type errors
-  const allConditions = Object.values(ItemCondition) as string[];
-
-  const categories = categoriesRaw
-    ? (categoriesRaw.split(",").filter(Boolean) as ListingCategory[])
-    : [];
-
-  const conditions = conditionsRaw
-    ? (conditionsRaw
-        .split(",")
-        .filter((v) => allConditions.includes(v)) as ItemCondition[])
-    : [];
-
-  const carriers = shippingRaw
-    ? (shippingRaw.split(",").filter(Boolean) as ShippingCarrier[])
-    : [];
-
-  const sortRaw = sp.get("sort") ?? "newest";
-  const sort: SortKey =
-    sortRaw === "price-asc" || sortRaw === "price-desc" ? sortRaw : "newest";
-
-  // Token: only accept the 4 approved values to avoid type pollution
-  const tokenRaw = sp.get("token");
-  const token: TradeToken | null =
-    tokenRaw && APPROVED_TOKENS.has(tokenRaw) ? (tokenRaw as TradeToken) : null;
-
-  return {
-    filters: {
-      categories,
-      conditions,
-      carriers,
-      priceMin: sp.get("priceMin") ?? "",
-      priceMax: sp.get("priceMax") ?? "",
-      token,
-    },
-    sort,
-    query: sp.get("q") ?? "",
-  };
-}
-
 // ── Components ────────────────────────────────────────────────────────────────
 
 function ListingCardItem({
@@ -188,6 +100,11 @@ function ListingCardItem({
           <div className="w-full h-full flex items-center justify-center text-muted-foreground">
             <PackageSearch className="h-10 w-10 opacity-30" />
           </div>
+        )}
+        {(listing as ListingCard & { isPromoted?: boolean }).isPromoted && (
+          <span className="absolute top-2 left-2 text-[10px] font-semibold uppercase tracking-wide bg-amber-500 text-white px-2 py-0.5 rounded">
+            VIP
+          </span>
         )}
         <span
           className={`absolute top-2 right-2 ${TRUST_CLASSES[listing.sellerTrustLevel]}`}
@@ -290,10 +207,12 @@ function ActiveFilterChips({
     ocid: string;
   }[] = [];
 
-  if (filters.categories[0]) {
+  if (filters.categoryId != null) {
+    const catNode = getCategoryById(filters.categoryId);
+  const loc = (typeof window !== "undefined" && document.documentElement.lang === "uk") ? "uk" : "en";
     chips.push({
       key: "category",
-      label: `${t("filter.category")}: ${filters.categories[0]}`,
+      label: `${t("filter.category")}: ${catNode ? categoryLabel(catNode, loc as "uk" | "en") : filters.categoryId}`,
       onRemove: onRemoveCategory,
       ocid: "chip-category",
     });
@@ -382,22 +301,16 @@ function ActiveFilterChips({
 
 export default function ListingsPage() {
   const navigate = useNavigate();
+  const routeSearch = listingsRouteApi.useSearch();
   const { actor, isFetching } = useActor(createActor);
   const { t } = useLocale();
 
-  // ── Initialise state from URL on first render ────────────────────────────
-  // Parse URL synchronously so useState can use initial values directly.
-  // This runs once during component initialisation (before first render).
-  const {
-    filters: initialFilters,
-    sort: initialSort,
-    query: initialQuery,
-  } = searchParamsToFilters(new URLSearchParams(window.location.search));
+  const initial = listingsSearchFromRoute(routeSearch);
 
-  const [query, setQuery] = useState(initialQuery);
-  const [committedQuery, setCommittedQuery] = useState(initialQuery);
-  const [sort, setSort] = useState<SortKey>(initialSort);
-  const [filters, setFilters] = useState<FilterState>(initialFilters);
+  const [query, setQuery] = useState(initial.query);
+  const [committedQuery, setCommittedQuery] = useState(initial.query);
+  const [sort, setSort] = useState<SortKey>(initial.sort);
+  const [filters, setFilters] = useState<FilterState>(initial.filters);
   const [offset, setOffset] = useState(0);
   const [allResults, setAllResults] = useState<ListingCard[]>([]);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
@@ -405,20 +318,36 @@ export default function ListingsPage() {
   // ── Sync filters → URL (replace, not push) ──────────────────────────────
   const syncToUrl = useCallback(
     (nextFilters: FilterState, nextSort: SortKey, nextQuery: string) => {
-      const sp = filtersToSearchParams(nextFilters, nextSort, nextQuery);
-      const searchStr = sp.toString();
       void navigate({
         to: "/listings",
-        search: searchStr ? `?${searchStr}` : "",
+        search: filtersToListingsSearch(nextFilters, nextSort, nextQuery),
         replace: true,
       });
     },
     [navigate],
   );
 
+  // Browser back/forward: re-hydrate local state from route search params
+  useEffect(() => {
+    const parsed = listingsSearchFromRoute(routeSearch);
+    if (
+      filtersEqual(parsed.filters, filters) &&
+      parsed.sort === sort &&
+      parsed.query === committedQuery
+    ) {
+      return;
+    }
+    setFilters(parsed.filters);
+    setSort(parsed.sort);
+    setQuery(parsed.query);
+    setCommittedQuery(parsed.query);
+    setOffset(0);
+    setAllResults([]);
+  }, [routeSearch, filters, sort, committedQuery]);
+
   const activeCount = useMemo(
     () =>
-      filters.categories.length +
+      (filters.categoryId != null ? 1 : 0) +
       filters.conditions.length +
       filters.carriers.length +
       (filters.priceMin ? 1 : 0) +
@@ -436,7 +365,7 @@ export default function ListingsPage() {
   const queryKey = [
     "listings",
     committedQuery,
-    filters.categories[0] ?? null,
+    filters.categoryId,
     filters.priceMin,
     filters.priceMax,
     filters.conditions[0] ?? null,
@@ -449,45 +378,40 @@ export default function ListingsPage() {
     queryKey,
     queryFn: async () => {
       if (!actor) return [];
-      // Token filter is frontend-only — backend searchListings does not support
-      // a token parameter (TASK-005 blocker: backend extension needed for
-      // server-side token filtering). Client-side filtering is applied below.
-      const results = await actor.searchListings(
-        committedQuery || null,
-        filters.categories.length === 1 ? filters.categories[0] : null,
-        filters.priceMin
-          ? BigInt(Math.floor(Number.parseFloat(filters.priceMin) * 1_000_000))
-          : null,
-        filters.priceMax
-          ? BigInt(Math.floor(Number.parseFloat(filters.priceMax) * 1_000_000))
-          : null,
-        null,
-        filters.conditions.length === 1 ? filters.conditions[0] : null,
-        filters.carriers.length === 1 ? filters.carriers[0] : null,
-        BigInt(offset),
-        BigInt(PAGE_SIZE),
-      );
-
-      // Client-side token filter: priceToken is the field on ListingCard
-      const filtered =
-        filters.token !== null
-          ? results.filter((l) => l.priceToken === filters.token)
-          : results;
+      let results: ListingCard[];
+      try {
+        results = await searchListingsWithCategory(actor, {
+          query: committedQuery || null,
+          category: null,
+          categoryId: filters.categoryId,
+          priceMin: filters.priceMin
+            ? BigInt(Math.floor(Number.parseFloat(filters.priceMin) * 1_000_000))
+            : null,
+          priceMax: filters.priceMax
+            ? BigInt(Math.floor(Number.parseFloat(filters.priceMax) * 1_000_000))
+            : null,
+          location: null,
+          condition: filters.conditions.length === 1 ? filters.conditions[0] : null,
+          shippingCarrier: filters.carriers.length === 1 ? filters.carriers[0] : null,
+          offset: BigInt(offset),
+          limit: BigInt(PAGE_SIZE),
+          priceToken: filters.token,
+        });
+      } catch {
+        results = [];
+      }
 
       if (offset === 0) {
-        setAllResults(filtered);
+        setAllResults(results);
       } else {
-        setAllResults((prev) => [...prev, ...filtered]);
+        setAllResults((prev) => [...prev, ...results]);
       }
-      return filtered;
+      return results;
     },
     enabled: !!actor && !isFetching && !isPriceRangeInvalid,
   });
 
-  const sorted = useMemo(
-    () => sortListings(allResults, sort),
-    [allResults, sort],
-  );
+  const sorted = useMemo(() => sortListings(allResults, sort), [allResults, sort]);
   const hasMore = (data?.length ?? 0) === PAGE_SIZE;
 
   const handleSearch = useCallback(() => {
@@ -521,14 +445,14 @@ export default function ListingsPage() {
     setAllResults([]);
     setCommittedQuery("");
     setQuery("");
-    void navigate({ to: "/listings", replace: true });
+    void navigate({ to: "/listings", search: {}, replace: true });
   }, [navigate]);
 
   const handleLoadMore = () => setOffset((prev) => prev + PAGE_SIZE);
 
   // ── Chip removal handlers ────────────────────────────────────────────────
   const removeCategory = useCallback(
-    () => handleFilterChange({ ...filters, categories: [] }),
+    () => handleFilterChange({ ...filters, categoryId: null }),
     [filters, handleFilterChange],
   );
   const removeCondition = useCallback(
@@ -585,6 +509,21 @@ export default function ListingsPage() {
               <SelectItem value="price-desc">Price: High → Low</SelectItem>
             </SelectContent>
           </Select>
+          <SavedSearchesPanel
+            filters={filters}
+            sort={sort}
+            query={committedQuery}
+            onApply={(paramsJson) => {
+              try {
+                const search = JSON.parse(paramsJson) as ReturnType<
+                  typeof filtersToListingsSearch
+                >;
+                navigate({ to: "/listings", search });
+              } catch {
+                /* ignore invalid saved payload */
+              }
+            }}
+          />
           {/* Mobile filter trigger */}
           <Sheet open={mobileFiltersOpen} onOpenChange={setMobileFiltersOpen}>
             <SheetTrigger asChild>

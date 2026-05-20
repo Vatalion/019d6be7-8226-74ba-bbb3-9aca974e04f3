@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { TradeToken } from "../../backend.d";
 import { useBackend } from "../../hooks/useBackend";
 import { useLocale } from "../../hooks/useLocale";
+import ExplorerApiKeysForm from "./ExplorerApiKeysForm";
 
 const ALL_TOKENS = Object.values(TradeToken);
 
@@ -340,6 +341,8 @@ export default function SystemSettingsForm() {
                 </div>
               </div>
             </fieldset>
+
+            <ExplorerApiKeysForm />
 
             <div className="flex items-center justify-end gap-3 border-t border-border pt-4">
               {isDirty && (

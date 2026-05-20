@@ -14,6 +14,7 @@ import Reputation "../lib/Reputation";
 import PaymentsLib "../lib/Payments";
 import RateLimiter "../lib/RateLimiter";
 import Admin "../lib/Admin";
+import DigitalEncryption "../lib/DigitalEncryption";
 
 /// Escrow API mixin — public endpoints for the P2P trade state machine.
 /// Covers both the manual off-chain flow and the ICRC-1 on-chain escrow flow.
@@ -234,14 +235,32 @@ mixin (
           case null {};
           case (?listing) {
             if (listing.isDigital) {
-              switch (listing.digitalFileUrl) {
+              // Resolve fileUrl: prefer encrypted field, fall back to plain text
+              let resolvedFileUrl : ?Text = switch (listing.digitalFileUrlEncrypted) {
+                case (?enc) {
+                  let salt = listing.id.toText();
+                  let key  = DigitalEncryption.deriveKey(selfPrincipal.value, salt);
+                  DigitalEncryption.decryptText(key, enc)
+                };
+                case null { listing.digitalFileUrl };
+              };
+              // Resolve password: prefer encrypted field, fall back to plain text
+              let resolvedPassword : ?Text = switch (listing.digitalPasswordEncrypted) {
+                case (?enc) {
+                  let salt = listing.id.toText();
+                  let key  = DigitalEncryption.deriveKey(selfPrincipal.value, salt);
+                  DigitalEncryption.decryptText(key, enc)
+                };
+                case null { listing.digitalPassword };
+              };
+              switch (resolvedFileUrl) {
                 case null {};
                 case (?fileUrl) {
                   let now = Time.now();
                   let delivery : Types.DigitalDelivery = {
                     fileUrl;
                     fileHash           = listing.digitalFileHash;
-                    password           = listing.digitalPassword;
+                    password           = resolvedPassword;
                     revealedAt         = ?now;
                     inspectionDeadline = ?(now + INSPECTION_PERIOD_NS);
                   };

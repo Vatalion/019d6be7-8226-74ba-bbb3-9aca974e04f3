@@ -1,5 +1,7 @@
 # Development Backlog
 
+> **⚠️ Deprecated 2026-05-19** — use [_bmad-output/planning-artifacts/epics.md](_bmad-output/planning-artifacts/epics.md) and [prd.md](_bmad-output/planning-artifacts/prd.md) instead. This file is historical only (many items are stale).
+
 > **P2P Crypto Marketplace on ICP** — Decentralized, trustless, stablecoin-only.
 > Last updated: 2026-04-12
 > Payments: Stablecoins ONLY — USDT and USDC on TRC20 (Tron), BEP20 (BSC), ERC20 (Ethereum), SPL (Solana), Polygon, Avalanche — **no fiat, no ICP-native tokens**

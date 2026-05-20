@@ -1,4 +1,5 @@
 import Map "mo:core/Map";
+import List "mo:core/List";
 import Int "mo:core/Int";
 import Principal "mo:core/Principal";
 import Types "../types";
@@ -7,6 +8,9 @@ import Marketplace "../lib/Marketplace";
 import Reputation "../lib/Reputation";
 import PaymentsLib "../lib/Payments";
 import RateLimiter "../lib/RateLimiter";
+import Admin "../lib/Admin";
+import CategoryCatalog "../lib/CategoryCatalog";
+import Time "mo:core/Time";
 
 /// Marketplace mixin — public canister API for listing management.
 mixin (
@@ -16,14 +20,22 @@ mixin (
   nextListingId : { var value : Nat },
   rateLimitCreateListing  : Map.Map<Principal, (Nat, Types.Timestamp)>,
   rateLimitListingMutations : Map.Map<Principal, (Nat, Types.Timestamp)>,
+  auditLog    : List.List<Admin.AuditEntry>,
+  nextAuditId : { var value : Nat },
+  selfPrincipal : { var value : Principal },
 ) {
 
   // ─── Create ───────────────────────────────────────────────────────────────
+
+  public shared query func listCategories() : async [Types.CategoryNode] {
+    CategoryCatalog.all()
+  };
 
   public shared ({ caller }) func createListing(
     title          : Text,
     description    : Text,
     category       : Types.ListingCategory,
+    categoryId     : ?Types.CategoryId,
     priceAmount    : Nat,
     priceToken     : Types.TradeToken,
     condition      : Types.ItemCondition,
@@ -73,7 +85,8 @@ mixin (
 
     let result = Marketplace.createListing(
       listings, spamTracker, id, caller,
-      title, description, category,
+      selfPrincipal.value,
+      title, description, category, categoryId,
       priceAmount, priceToken, condition,
       photos, location, shippingMethods,
       isDigital, digitalFileUrl,
@@ -103,6 +116,7 @@ mixin (
     title          : Text,
     description    : Text,
     category       : Types.ListingCategory,
+    categoryId     : ?Types.CategoryId,
     priceAmount    : Nat,
     priceToken     : Types.TradeToken,
     condition      : Types.ItemCondition,
@@ -143,7 +157,7 @@ mixin (
 
     Marketplace.updateListing(
       listings, caller, id,
-      title, description, category,
+      title, description, category, categoryId,
       priceAmount, priceToken, condition,
       photos, location, shippingMethods,
       digitalFileUrl,
@@ -197,7 +211,7 @@ mixin (
         switch (users.get(listing.seller)) {
           case null null;
           case (?seller) {
-            ?Marketplace.toListingCard(listing, seller)
+            ?Marketplace.toListingCard(listing, seller, Time.now())
           };
         }
       };
@@ -221,6 +235,7 @@ mixin (
   public shared query func searchListings(
     query_          : ?Text,
     category        : ?Types.ListingCategory,
+    categoryId      : ?Types.CategoryId,
     priceMin        : ?Nat,
     priceMax        : ?Nat,
     location        : ?Text,
@@ -228,15 +243,18 @@ mixin (
     shippingCarrier : ?Types.ShippingCarrier,
     offset          : Nat,
     limit           : Nat,
+    priceToken      : ?Types.TradeToken,
   ) : async [Types.ListingCard] {
     let params : Marketplace.SearchParams = {
       searchText = query_;
       category;
+      categoryId;
       priceMin;
       priceMax;
       location;
       condition;
       shippingCarrier;
+      priceToken;
       offset;
       limit;
     };
@@ -246,7 +264,7 @@ mixin (
     results.filterMap(func(l : Types.Listing) : ?Types.ListingCard {
       switch (users.get(l.seller)) {
         case null null;
-        case (?seller) { ?Marketplace.toListingCard(l, seller) };
+        case (?seller) { ?Marketplace.toListingCard(l, seller, Time.now()) };
       }
     })
   };
@@ -263,7 +281,7 @@ mixin (
     results.filterMap(func(l : Types.Listing) : ?Types.ListingCard {
       switch (users.get(l.seller)) {
         case null null;
-        case (?seller) { ?Marketplace.toListingCard(l, seller) };
+        case (?seller) { ?Marketplace.toListingCard(l, seller, Time.now()) };
       }
     })
   };
@@ -277,12 +295,29 @@ mixin (
     results.filterMap(func(l : Types.Listing) : ?Types.ListingCard {
       switch (users.get(l.seller)) {
         case null null;
-        case (?seller) { ?Marketplace.toListingCard(l, seller) };
+        case (?seller) { ?Marketplace.toListingCard(l, seller, Time.now()) };
       }
     })
   };
 
   // ─── Admin ────────────────────────────────────────────────────────────────
+
+  /// Report a listing for moderation (OLX-style). Logged to admin audit.
+  public shared ({ caller }) func reportListing(
+    listingId : Types.ListingId,
+    reason    : Text,
+  ) : async Types.Result<()> {
+    Auth.assertNotAnonymous(caller);
+    ignore Auth.requireUser(users, caller);
+    if (not RateLimiter.check(caller, 3_600_000_000_000, 10, rateLimitListingMutations)) {
+      return #err(#rate_limited);
+    };
+    let (newAuditId, result) = Admin.reportListing(
+      listings, auditLog, nextAuditId.value, caller, listingId, reason,
+    );
+    nextAuditId.value := newAuditId;
+    result
+  };
 
   public shared ({ caller }) func adminRemoveListing(
     id     : Types.ListingId,
@@ -311,7 +346,7 @@ mixin (
     results.filterMap(func(l : Types.Listing) : ?Types.ListingCard {
       switch (users.get(l.seller)) {
         case null null;
-        case (?seller) { ?Marketplace.toListingCard(l, seller) };
+        case (?seller) { ?Marketplace.toListingCard(l, seller, Time.now()) };
       }
     })
   };

@@ -16,6 +16,7 @@ const translations = {
     // Navigation
     "nav.browse": "Browse",
     "nav.myTrades": "My Trades",
+    "nav.favorites": "Favorites",
     "nav.sell": "Sell",
     "nav.admin": "Admin",
     "nav.jurors": "Juror Board",
@@ -28,16 +29,19 @@ const translations = {
     "nav.badge_unread_messages": "unread messages",
 
     // Hero
-    "hero.badge": "Decentralized P2P Marketplace",
-    "hero.title": "Buy & Sell with Crypto —",
-    "hero.titleHighlight": "Securely",
+    "hero.badge": "Crypto classifieds — like OLX, pay in stablecoins",
+    "hero.title": "Buy & Sell Goods with Crypto —",
+    "hero.titleHighlight": "No Fiat Step",
     "hero.subtitle":
-      "Peer-to-peer trading with secure payment confirmation. Pay with USDT or USDC on any major blockchain — no middlemen, no banks.",
+      "List items, agree in chat, and pay wallet-to-wallet in USDT or USDC. The platform records the deal, deadlines, and disputes — you stay pseudonymous; we do not convert crypto to cash.",
     "hero.browseCta": "Browse Listings",
     "hero.loginCta": "Log in with Internet Identity",
     "hero.welcomeBack": "Welcome back",
 
     // Listings
+    "home.categories.title": "Browse by category",
+    "home.categories.all": "All listings",
+
     "listings.featured": "Featured Listings",
     "listings.featuredSub": "Latest items from verified sellers",
     "listings.viewAll": "View all",
@@ -59,20 +63,20 @@ const translations = {
 
     // How it works
     "hiw.title": "How It Works",
-    "hiw.subtitle": "Three simple steps to your next secure crypto trade",
+    "hiw.subtitle": "Three steps — goods first, stablecoins only, platform-backed rules",
     "hiw.step1.title": "Post a Listing",
     "hiw.step1.desc":
-      "Describe your item, set a price in crypto, add photos and shipping options. Your listing goes live instantly.",
-    "hiw.step2.title": "Agree on Price & Payment",
+      "Describe your item, set a price in USDT or USDC, add photos, and choose pickup or digital delivery. Your listing goes live instantly.",
+    "hiw.step2.title": "Pay Wallet-to-Wallet",
     "hiw.step2.desc":
-      "Buyer initiates a trade and selects a supported token. Both parties confirm the deal before funds move.",
-    "hiw.step3.title": "Trade with Secure Confirmation",
+      "Buyer starts a trade and sends stablecoins directly to the seller's address. No bank, no card, no in-app fiat conversion.",
+    "hiw.step3.title": "Confirm & Resolve on Platform",
     "hiw.step3.desc":
-      "Both parties manually confirm the transaction. Dispute support available if anything goes wrong.",
+      "Both sides confirm payment in the app. Timelines, chat, and disputes are handled by platform rules — on-chain escrow comes in a later phase.",
 
     // Trust
     // TODO: rename key when backend contract changes
-    "trust.escrow": "Trade Protection",
+    "trust.escrow": "Platform Trade Rules",
     "trust.identity": "Internet Identity Auth",
     "trust.multiToken": "Multi-Token Support",
 
@@ -251,6 +255,36 @@ const translations = {
     "detail.notFoundDesc":
       "This listing may have been removed or doesn't exist.",
     "detail.browseListings": "Browse listings",
+    "detail.shareLink": "Share",
+    "detail.linkCopied": "Link copied",
+    "detail.reportListing": "Report",
+    "detail.reportTitle": "Report this listing",
+    "detail.reportDesc":
+      "Describe the issue (spam, scam, prohibited goods). Moderators review reports in the audit log.",
+    "detail.reportReason": "Reason",
+    "detail.reportSubmit": "Submit report",
+    "detail.reportSuccess": "Report submitted. Thank you.",
+    "detail.reportError": "Could not submit report",
+    "detail.signInToReport": "Sign in to report listings",
+    "detail.onChainEscrowBeta":
+      "On-chain escrow (ckUSDC/ckUSDT) is in beta — see How payments work.",
+    "privacy.title": "Privacy & pseudonymity",
+    "privacy.backHome": "Back to home",
+    "privacy.intro":
+      "CryptoMarket uses Internet Identity. You stay pseudonymous: we do not require legal name, email, or phone for trading.",
+    "privacy.pseudonymousTitle": "What pseudonymous means here",
+    "privacy.pseudonymousBody":
+      "Your public profile shows a username and reputation — not your real identity. Other users cannot see your full principal ID on your profile.",
+    "privacy.weStoreTitle": "What we store on-chain",
+    "privacy.weStore1": "Username, avatar URL, listings, trades, and messages tied to your II principal",
+    "privacy.weStore2": "Trade and dispute history for platform rules",
+    "privacy.weStore3": "Optional payment addresses you add for receiving crypto",
+    "privacy.weDoNotTitle": "What we do not do",
+    "privacy.weDoNot1": "No custodial fiat wallets or bank account collection in Phase 1",
+    "privacy.weDoNot2": "No mandatory KYC for basic marketplace use",
+    "privacy.weDoNot3": "No selling of personal data to third parties",
+    "privacy.paymentsLink": "How payments work (Phase 1 vs trustless path)",
+    "footer.privacy": "Privacy",
     "detail.description": "Description",
     "detail.noDescription": "No description available for this listing.",
     "detail.verified": "Verified",
@@ -354,6 +388,35 @@ const translations = {
     "shipping.requestFailed": "Tracking request failed",
 
     // Footer
+    "paymentsGuide.title": "How payments work",
+    "paymentsGuide.intro":
+      "CryptoMarket is an OLX-style goods marketplace. Stablecoins move wallet-to-wallet; the platform coordinates trade state and disputes — it does not custody your funds in Phase 1.",
+    "paymentsGuide.honestyBanner":
+      "We do not call Phase 1 “trustless escrow”. Funds are not locked on-chain by the platform until a later phase ships.",
+    "paymentsGuide.backHome": "Back to home",
+    "paymentsGuide.browseCta": "Browse listings",
+    "paymentsGuide.tradesCta": "My trades",
+    "paymentsGuide.learnMore": "How payments work",
+    "paymentsGuide.phase1.title": "Phase 1 — Coordinated P2P (live today)",
+    "paymentsGuide.phase1.body":
+      "Buyer and seller agree on a listing, then settle in USDT or USDC directly between wallets.",
+    "paymentsGuide.phase1.item1":
+      "Buyer sends stablecoins on the correct network (TRC20, BEP20, or ERC20).",
+    "paymentsGuide.phase1.item2":
+      "Buyer taps “I have sent the payment”; seller checks their wallet and confirms receipt.",
+    "paymentsGuide.phase1.item3":
+      "Optional: paste a transaction hash for an on-chain check (does not move funds on the platform).",
+    "paymentsGuide.phase2.title": "Phase 2 — Stronger verification",
+    "paymentsGuide.phase2.body":
+      "Explorer checks and retries improve confidence that the right amount reached the seller’s address.",
+    "paymentsGuide.phase2.item1": "Supported tokens: USDT (TRC20, BEP20, ERC20) and USDC (ERC20).",
+    "paymentsGuide.phase2.item2":
+      "If verification fails, manual confirmation still completes the trade.",
+    "paymentsGuide.phase3.title": "Phase 3 — On-chain settlement (planned)",
+    "paymentsGuide.phase3.body":
+      "Future releases may lock funds under protocol rules. We will update marketing only when that ships.",
+    "paymentsGuide.phase3.item1":
+      "No “atomic swap” or “trustless escrow” promise before Phase 3 is live.",
     "footer.builtWith": "Built with love using",
 
     // Common
@@ -417,6 +480,8 @@ const translations = {
       "Your payment has been confirmed on-chain. The seller will be notified.",
     "verify.statusFailed": "Verification Failed",
     "verify.statusFailedRetry": "Try again with a different hash",
+    "verify.explorerOptional":
+      "Optional: on-chain check helps the seller see your payment faster. You can still complete the trade with manual confirmation if verification fails.",
     "verify.blockNumber": "Block",
     "verify.confirmedAmount": "Confirmed Amount",
     "verify.confirmedRecipient": "Recipient",
@@ -924,6 +989,8 @@ const translations = {
       "File uploads are only available on the live site.",
     "upload.errorNetwork":
       "Network error during upload. Check your connection.",
+    "upload.errorBudget":
+      "Object storage budget is exhausted. Ask the project owner to top up Caffeine storage cycles, then try again.",
     "upload.previewBanner":
       "Photo upload is only available on the live site. Open the live URL to add photos.",
 
@@ -975,6 +1042,8 @@ const translations = {
     "listing.meestPudoNoResults": "No PUDOs found",
 
     // Digital goods — create listing
+    "digital.encryptionNotice": "Will be encrypted before storage",
+    "digital.decryptedLabel": "Decrypted",
     "digital.field.fileHash": "File Hash (optional)",
     "digital.field.fileHashPlaceholder": "SHA-256 hash for dispute evidence",
     "digital.field.passwordProtection": "Enable password protection",
@@ -1158,6 +1227,16 @@ const translations = {
       "Send the stablecoin to the seller's address outside the app, then click the button below.",
     "trade.hint.verifyOffChain":
       "Verify the payment in your wallet or exchange, then confirm below.",
+    "trade.paymentPhase.title": "Phase 1 — wallet-to-wallet payment",
+    "trade.paymentPhase.body":
+      "The platform does not hold your stablecoins. You pay the seller directly from your wallet; the trade state here is coordinated off-chain confirmation.",
+    "trade.paymentPhase.step1":
+      "Buyer sends USDT/USDC to the seller's wallet on the correct network.",
+    "trade.paymentPhase.step2":
+      "Buyer taps “I have sent the payment”; seller checks their wallet and confirms receipt.",
+    "trade.paymentPhase.step3":
+      "Optional: paste a transaction hash after sending to run an on-chain check (does not move funds on the platform).",
+    "trade.tab.progress": "Trade",
     "trade.cancel": "Cancel trade",
 
     // Dispute modal i18n (TASK-006)
@@ -1218,6 +1297,24 @@ const translations = {
     "validation.bio.max": "Bio cannot exceed 500 characters.",
     "admin.scope.note":
       "Stablecoin scope is limited to the approved 4-token set.",
+    "admin.explorerKeys.title": "Blockchain explorer API keys",
+    "admin.explorerKeys.intro":
+      "Required for on-chain payment verification (TRC20 via TronGrid, BEP20 via BSCScan, ERC20 via Infura). Keys are stored on-chain and never shown again after save.",
+    "admin.explorerKeys.tronGrid": "TronGrid API key",
+    "admin.explorerKeys.tronGridHint": "Enables TRC20 payment verification.",
+    "admin.explorerKeys.bscScan": "BSCScan API key",
+    "admin.explorerKeys.bscScanHint": "Enables BEP20 payment verification.",
+    "admin.explorerKeys.infura": "Infura API key",
+    "admin.explorerKeys.infuraHint": "Enables ERC20 / USDC verification.",
+    "admin.explorerKeys.placeholder": "Paste API key",
+    "admin.explorerKeys.save": "Save key",
+    "admin.explorerKeys.saving": "Saving…",
+    "admin.explorerKeys.saved": "Explorer API key saved",
+    "admin.explorerKeys.saveFailed": "Failed to save API key",
+    "admin.explorerKeys.configured": "Configured",
+    "admin.explorerKeys.notConfigured": "Not configured",
+    "admin.explorerKeys.statusPendingDeploy":
+      "Key status will appear after the next backend deploy; you can still save keys below.",
     "profile.avatar.sizeError": "Avatar image must be under 5 MB.",
 
     // TASK-009: Shipping TTN fallback + tracking display + dispute improvements
@@ -1235,6 +1332,7 @@ const translations = {
     // Navigation
     "nav.browse": "Перегляд",
     "nav.myTrades": "Мої угоди",
+    "nav.favorites": "Обране",
     "nav.sell": "Продати",
     "nav.admin": "Адмін",
     "nav.jurors": "Журі",
@@ -1247,16 +1345,19 @@ const translations = {
     "nav.badge_unread_messages": "непрочитані повідомлення",
 
     // Hero
-    "hero.badge": "Децентралізований P2P маркетплейс",
-    "hero.title": "Купуй та продавай за крипто —",
-    "hero.titleHighlight": "Безпечно",
+    "hero.badge": "Крипто-оголошення — як OLX, оплата в стейблкоїнах",
+    "hero.title": "Купуй і продавай речі за крипто —",
+    "hero.titleHighlight": "Без кроку через фіат",
     "hero.subtitle":
-      "P2P торгівля з безпечним підтвердженням оплати. Оплата USDT або USDC у будь-якому популярному блокчейні — без посередників і банків.",
+      "Додавай оголошення, домовляйся в чаті та плати гаманець-на-гаманець у USDT або USDC. Платформа фіксує угоду, терміни й спори — ви залишаєтесь псевдонімними; ми не конвертуємо крипто в готівку.",
     "hero.browseCta": "Переглянути оголошення",
     "hero.loginCta": "Увійти через Internet Identity",
     "hero.welcomeBack": "З поверненням",
 
     // Listings
+    "home.categories.title": "Категорії OLX",
+    "home.categories.all": "Усі оголошення",
+
     "listings.featured": "Вибрані оголошення",
     "listings.featuredSub": "Останні товари від перевірених продавців",
     "listings.viewAll": "Всі",
@@ -1279,20 +1380,20 @@ const translations = {
 
     // How it works
     "hiw.title": "Як це працює",
-    "hiw.subtitle": "Три прості кроки до безпечної крипто-угоди",
+    "hiw.subtitle": "Три кроки — товар, стейблкоїни, правила платформи",
     "hiw.step1.title": "Додайте оголошення",
     "hiw.step1.desc":
-      "Опишіть товар, вкажіть ціну в крипто, додайте фото та варіанти доставки. Оголошення з'явиться миттєво.",
-    "hiw.step2.title": "Домовтеся про ціну та оплату",
+      "Опишіть товар, ціну в USDT або USDC, фото та самовивіз або цифрову доставку. Оголошення з'явиться миттєво.",
+    "hiw.step2.title": "Оплата гаманець-на-гаманець",
     "hiw.step2.desc":
-      "Покупець ініціює угоду та обирає токен. Обидві сторони підтверджують умови до переказу коштів.",
-    "hiw.step3.title": "Безпечне підтвердження угоди",
+      "Покупець відкриває угоду й надсилає стейблкоїни напряму на адресу продавця. Без банку, картки та конвертації в гривню на платформі.",
+    "hiw.step3.title": "Підтвердження та спори на платформі",
     "hiw.step3.desc":
-      "Обидві сторони вручну підтверджують транзакцію. Є підтримка спорів у разі проблем.",
+      "Обидві сторони підтверджують оплату в застосунку. Терміни, чат і спори — за правилами платформи; ончейн-ескроу — у наступній фазі.",
 
     // Trust
     // TODO: rename key when backend contract changes
-    "trust.escrow": "Захист угоди",
+    "trust.escrow": "Правила угоди на платформі",
     "trust.identity": "Internet Identity",
     "trust.multiToken": "Підтримка токенів",
 
@@ -1473,6 +1574,36 @@ const translations = {
     "detail.notFound": "Оголошення не знайдено",
     "detail.notFoundDesc": "Це оголошення могло бути видалено або не існує.",
     "detail.browseListings": "Переглянути оголошення",
+    "detail.shareLink": "Поділитися",
+    "detail.linkCopied": "Посилання скопійовано",
+    "detail.reportListing": "Скарга",
+    "detail.reportTitle": "Поскаржитися на оголошення",
+    "detail.reportDesc":
+      "Опишіть проблему (спам, шахрайство, заборонений товар). Модератори бачать скарги в audit log.",
+    "detail.reportReason": "Причина",
+    "detail.reportSubmit": "Надіслати скаргу",
+    "detail.reportSuccess": "Скаргу надіслано. Дякуємо.",
+    "detail.reportError": "Не вдалося надіслати скаргу",
+    "detail.signInToReport": "Увійдіть, щоб поскаржитися",
+    "detail.onChainEscrowBeta":
+      "Ончейн-ескроу (ckUSDC/ckUSDT) у бета — див. Як працюють платежі.",
+    "privacy.title": "Приватність і псевдоанонімність",
+    "privacy.backHome": "На головну",
+    "privacy.intro":
+      "CryptoMarket використовує Internet Identity. Ви залишаєтесь псевдоанонімними: для торгівлі не потрібні ПІБ, email чи телефон.",
+    "privacy.pseudonymousTitle": "Що означає псевдоанонімність",
+    "privacy.pseudonymousBody":
+      "У публічному профілі — лише нік і репутація, не реальна особа. Інші не бачать повний principal ID на вашому профілі.",
+    "privacy.weStoreTitle": "Що зберігається в каністрі",
+    "privacy.weStore1": "Нік, аватар, оголошення, угоди та повідомлення, прив’язані до II",
+    "privacy.weStore2": "Історія угод і спорів для правил платформи",
+    "privacy.weStore3": "Адреси для отримання крипто, які ви додаєте самі",
+    "privacy.weDoNotTitle": "Чого ми не робимо",
+    "privacy.weDoNot1": "Немає кастодіальних фіат-гаманців у Фазі 1",
+    "privacy.weDoNot2": "Немає обов’язкового KYC для базового маркетплейсу",
+    "privacy.weDoNot3": "Не продаємо персональні дані третім сторонам",
+    "privacy.paymentsLink": "Як працюють платежі (Фаза 1 vs trustless)",
+    "footer.privacy": "Приватність",
     "detail.description": "Опис",
     "detail.noDescription": "Опис для цього оголошення недоступний.",
     "detail.verified": "Верифікований",
@@ -1578,6 +1709,35 @@ const translations = {
     "shipping.requestFailed": "Запит відстеження не вдався",
 
     // Footer
+    "paymentsGuide.title": "Як працюють платежі",
+    "paymentsGuide.intro":
+      "CryptoMarket — маркетплейс товарів у стилі OLX. Стейблкоїни рухаються гаманець-на-гаманець; платформа координує стан угоди та спори — у Фазі 1 не утримує ваші кошти.",
+    "paymentsGuide.honestyBanner":
+      "Ми не називаємо Фазу 1 «trustless escrow». Кошти не блокуються на платформі в блокчейні, доки не з’явиться наступна фаза.",
+    "paymentsGuide.backHome": "На головну",
+    "paymentsGuide.browseCta": "Переглянути оголошення",
+    "paymentsGuide.tradesCta": "Мої угоди",
+    "paymentsGuide.learnMore": "Як працюють платежі",
+    "paymentsGuide.phase1.title": "Фаза 1 — координований P2P (зараз)",
+    "paymentsGuide.phase1.body":
+      "Покупець і продавець домовляються за оголошенням, потім розраховуються USDT або USDC напряму між гаманцями.",
+    "paymentsGuide.phase1.item1":
+      "Покупець відправляє стейблкоїн у правильній мережі (TRC20, BEP20 або ERC20).",
+    "paymentsGuide.phase1.item2":
+      "Покупець натискає «Я відправив оплату»; продавець перевіряє гаманець і підтверджує отримання.",
+    "paymentsGuide.phase1.item3":
+      "За бажанням: хеш транзакції для перевірки в блокчейні (кошти на платформі не рухаються).",
+    "paymentsGuide.phase2.title": "Фаза 2 — надійніша перевірка",
+    "paymentsGuide.phase2.body":
+      "Перевірки через експлорери та повторні спроби підвищують впевненість, що сума дійшла на адресу продавця.",
+    "paymentsGuide.phase2.item1": "Підтримка: USDT (TRC20, BEP20, ERC20) та USDC (ERC20).",
+    "paymentsGuide.phase2.item2":
+      "Якщо перевірка не вдалась — угоду все одно можна завершити вручну.",
+    "paymentsGuide.phase3.title": "Фаза 3 — розрахунок у блокчейні (заплановано)",
+    "paymentsGuide.phase3.body":
+      "Майбутні релізи можуть блокувати кошти за правилами протоколу. Маркетинг оновимо лише після запуску.",
+    "paymentsGuide.phase3.item1":
+      "Без обіцянок «atomic swap» чи «trustless escrow» до запуску Фази 3.",
     "footer.builtWith": "Зроблено з любов'ю за допомогою",
 
     // Common
@@ -1642,6 +1802,8 @@ const translations = {
       "Вашу оплату підтверджено в мережі. Продавця буде повідомлено.",
     "verify.statusFailed": "Верифікацію не вдалось",
     "verify.statusFailedRetry": "Спробуйте з іншим хешем",
+    "verify.explorerOptional":
+      "Необов’язково: перевірка в блокчейні прискорює підтвердження для продавця. Якщо не вийде — угоду можна завершити вручну.",
     "verify.blockNumber": "Блок",
     "verify.confirmedAmount": "Підтверджена сума",
     "verify.confirmedRecipient": "Отримувач",
@@ -2192,6 +2354,8 @@ const translations = {
     "listing.meestPudoNoResults": "Пунктів PUDO не знайдено",
 
     // Digital goods — create listing
+    "digital.encryptionNotice": "Буде зашифровано перед збереженням",
+    "digital.decryptedLabel": "Розшифровано",
     "digital.field.fileHash": "Хеш файлу (необов'язково)",
     "digital.field.fileHashPlaceholder":
       "SHA-256 хеш для доказової бази диспуту",
@@ -2378,6 +2542,16 @@ const translations = {
       "Відправте стейблкоїн на адресу продавця поза додатком, потім натисніть кнопку нижче.",
     "trade.hint.verifyOffChain":
       "Перевірте оплату у своєму гаманці або на біржі, потім підтвердіть нижче.",
+    "trade.paymentPhase.title": "Фаза 1 — оплата гаманець-на-гаманець",
+    "trade.paymentPhase.body":
+      "Платформа не утримує ваші стейблкоїни. Ви платите продавцю напряму з гаманця; стан угоди тут координується через підтвердження поза платформою.",
+    "trade.paymentPhase.step1":
+      "Покупець відправляє USDT/USDC на гаманець продавця в правильній мережі.",
+    "trade.paymentPhase.step2":
+      "Покупець натискає «Я відправив оплату»; продавець перевіряє гаманець і підтверджує отримання.",
+    "trade.paymentPhase.step3":
+      "За бажанням: після відправки вставте хеш транзакції для перевірки в блокчейні (кошти на платформі не рухаються).",
+    "trade.tab.progress": "Угода",
     "trade.cancel": "Скасувати угоду",
 
     // Dispute modal i18n (TASK-006)
@@ -2443,6 +2617,24 @@ const translations = {
     "validation.bio.max": "Біо не може перевищувати 500 символів.",
     "admin.scope.note":
       "Обсяг стейблкоїнів обмежено затвердженим набором із 4 токенів.",
+    "admin.explorerKeys.title": "API-ключі блокчейн-експлорерів",
+    "admin.explorerKeys.intro":
+      "Потрібні для ончейн-верифікації платежів (TRC20 — TronGrid, BEP20 — BSCScan, ERC20 — Infura). Ключі зберігаються в каністрі і після збереження не показуються знову.",
+    "admin.explorerKeys.tronGrid": "Ключ TronGrid API",
+    "admin.explorerKeys.tronGridHint": "Увімкнює верифікацію TRC20.",
+    "admin.explorerKeys.bscScan": "Ключ BSCScan API",
+    "admin.explorerKeys.bscScanHint": "Увімкнює верифікацію BEP20.",
+    "admin.explorerKeys.infura": "Ключ Infura API",
+    "admin.explorerKeys.infuraHint": "Увімкнює верифікацію ERC20 / USDC.",
+    "admin.explorerKeys.placeholder": "Вставте API-ключ",
+    "admin.explorerKeys.save": "Зберегти",
+    "admin.explorerKeys.saving": "Збереження…",
+    "admin.explorerKeys.saved": "API-ключ збережено",
+    "admin.explorerKeys.saveFailed": "Не вдалося зберегти ключ",
+    "admin.explorerKeys.configured": "Налаштовано",
+    "admin.explorerKeys.notConfigured": "Не налаштовано",
+    "admin.explorerKeys.statusPendingDeploy":
+      "Статус ключів з’явиться після наступного деплою бекенду; ключі можна зберегти вже зараз.",
     "profile.avatar.sizeError": "Зображення аватару має бути менше 5 МБ.",
 
     // TASK-009: Shipping TTN fallback + tracking display + dispute improvements
@@ -2463,6 +2655,8 @@ const translations = {
       "Завантаження файлів доступне лише в опублікованій версії.",
     "upload.errorNetwork":
       "Помилка мережі під час завантаження. Перевірте підключення.",
+    "upload.errorBudget":
+      "Бюджет сховища вичерпано. Попросіть власника проєкту поповнити цикли Caffeine storage і спробуйте знову.",
     "upload.previewBanner":
       "Завантаження фото доступне лише в опублікованій версії. Відкрийте live-версію, щоб додати фото.",
   },

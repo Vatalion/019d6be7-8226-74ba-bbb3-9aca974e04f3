@@ -23,7 +23,7 @@ import { useVisiblePolling } from "@/hooks/useVisiblePolling";
 import { handleResultError } from "@/utils/errorHandler";
 import { useInternetIdentity } from "@caffeineai/core-infrastructure";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -259,6 +259,47 @@ function SellerReminderPanel({
   );
 }
 
+function PaymentPhaseNotice() {
+  const { t: tl } = useLocale();
+  return (
+    <div
+      className="rounded-lg border border-border bg-muted/40 p-4 space-y-2"
+      data-ocid="payment-phase-notice"
+    >
+      <div className="flex items-start gap-2">
+        <Info className="w-4 h-4 text-accent shrink-0 mt-0.5" />
+        <div className="space-y-1 min-w-0">
+          <p className="text-sm font-semibold text-foreground">
+            {tl("trade.paymentPhase.title")}
+          </p>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            {tl("trade.paymentPhase.body")}
+          </p>
+        </div>
+      </div>
+      <ul className="text-xs text-muted-foreground space-y-1 pl-6 list-disc marker:text-accent">
+        <li>{tl("trade.paymentPhase.step1")}</li>
+        <li>{tl("trade.paymentPhase.step2")}</li>
+        <li>{tl("trade.paymentPhase.step3")}</li>
+      </ul>
+      <Link
+        to="/how-payments-work"
+        className="text-xs text-accent hover:underline inline-block"
+        data-ocid="trade-payment-phase-guide-link"
+      >
+        {tl("paymentsGuide.learnMore")} →
+      </Link>
+    </div>
+  );
+}
+
+const PAYMENT_PHASE_STATUSES: TradeStatus[] = [
+  TradeStatus.pending,
+  TradeStatus.funded,
+  TradeStatus.buyer_confirmed,
+  TradeStatus.payment_verified,
+];
+
 function TradeActions({
   trade,
   isBuyer,
@@ -329,6 +370,8 @@ function TradeActions({
 
   return (
     <div className="flex flex-col gap-3 mt-4" data-ocid="trade-actions">
+      {PAYMENT_PHASE_STATUSES.includes(s) && <PaymentPhaseNotice />}
+
       {/* Buyer instruction panel: shown for pending/funded states */}
       {isBuyer && (s === TradeStatus.pending || s === TradeStatus.funded) && (
         <NetworkInstructionPanel token={trade.token as TradeToken} />
@@ -906,6 +949,13 @@ function DigitalDeliveryCard({
             ocid="digital-delivery-copy-url"
           />
         </div>
+        <p
+          className="flex items-center gap-1.5 text-xs text-primary/70 mt-0.5"
+          data-ocid="digital-decrypted-indicator"
+        >
+          <CheckCircle2 className="w-3 h-3 shrink-0" />
+          {tl("digital.decryptedLabel")}
+        </p>
       </div>
 
       {/* Password */}
@@ -1545,7 +1595,7 @@ export default function TradeDetailPage() {
             <TabsList className="w-full mb-3" data-ocid="trade-mobile-tabs">
               <TabsTrigger value="escrow" className="flex-1 text-xs gap-1">
                 <ShieldCheck className="w-3.5 h-3.5" />
-                {tl("trade.step.initiated")}
+                {tl("trade.tab.progress")}
               </TabsTrigger>
               <TabsTrigger
                 value="chat"

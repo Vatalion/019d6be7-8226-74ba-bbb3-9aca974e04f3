@@ -9,6 +9,7 @@ import { ProfileGuard } from "./components/ProfileGuard";
 import Layout from "./components/layout/Layout";
 import { NotificationProvider } from "./contexts/NotificationContext";
 import { LocaleProvider } from "./hooks/useLocale";
+import { validateListingsSearch } from "./lib/listingsSearch";
 
 // Lazy page imports
 import { Suspense, lazy } from "react";
@@ -28,6 +29,9 @@ const VaultPage = lazy(() => import("./pages/VaultPage"));
 const AddPaymentMethod = lazy(() => import("./pages/AddPaymentMethodPage"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const OnboardingPage = lazy(() => import("./pages/OnboardingPage"));
+const HowPaymentsWork = lazy(() => import("./pages/HowPaymentsWorkPage"));
+const PrivacyPage = lazy(() => import("./pages/PrivacyPage"));
+const FavoritesPage = lazy(() => import("./pages/FavoritesPage"));
 
 function PageSuspense({ children }: { children: React.ReactNode }) {
   return (
@@ -79,6 +83,26 @@ const indexRoute = createRoute({
   ),
 });
 
+const howPaymentsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/how-payments-work",
+  component: () => (
+    <PageSuspense>
+      <HowPaymentsWork />
+    </PageSuspense>
+  ),
+});
+
+const privacyRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/privacy",
+  component: () => (
+    <PageSuspense>
+      <PrivacyPage />
+    </PageSuspense>
+  ),
+});
+
 const onboardingRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/onboarding",
@@ -89,9 +113,10 @@ const onboardingRoute = createRoute({
   ),
 });
 
-const listingsRoute = createRoute({
+export const listingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/listings",
+  validateSearch: validateListingsSearch,
   component: () => (
     <PageSuspense>
       <Listings />
@@ -115,6 +140,16 @@ const createListingRoute = createRoute({
   component: () => (
     <GuardedPage>
       <CreateListing />
+    </GuardedPage>
+  ),
+});
+
+const favoritesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/favorites",
+  component: () => (
+    <GuardedPage>
+      <FavoritesPage />
     </GuardedPage>
   ),
 });
@@ -211,10 +246,13 @@ const notFoundRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
+  howPaymentsRoute,
+  privacyRoute,
   onboardingRoute,
   createListingRoute,
   listingDetailRoute,
   listingsRoute,
+  favoritesRoute,
   tradeDetailRoute,
   tradesRoute,
   sellerProfileRoute,

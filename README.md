@@ -4,6 +4,8 @@ A decentralized peer-to-peer marketplace for buying and selling goods using stab
 
 **Current state:** Draft v63 | Live v43 | 12 of 13 gap-closure workstreams complete.
 
+**Product documentation (BMAD):** [docs/bmad/README.md](docs/bmad/README.md) — canonical PRD, architecture, epics, and gap analysis under `_bmad-output/planning-artifacts/`.
+
 ---
 
 ## Overview

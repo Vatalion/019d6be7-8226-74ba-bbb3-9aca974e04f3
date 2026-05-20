@@ -158,6 +158,37 @@ module {
     nextId + 1;
   };
 
+  /// User reports a listing (OLX-style abuse report). Logged to audit for moderators.
+  public func reportListing(
+    listings : Map.Map<Types.ListingId, Types.Listing>,
+    auditLog : List.List<AuditEntry>,
+    nextId   : Nat,
+    caller   : Principal,
+    listingId : Types.ListingId,
+    reason   : Text,
+  ) : (Nat, Types.Result<()>) {
+    Auth.assertNotAnonymous(caller);
+    if (reason.size() == 0) {
+      return (nextId, #err(#invalid_input("Report reason must not be empty")));
+    };
+    if (reason.size() > 500) {
+      return (nextId, #err(#invalid_input("Report reason must be at most 500 characters")));
+    };
+    switch (listings.get(listingId)) {
+      case null { (nextId, #err(#not_found)) };
+      case (?listing) {
+        if (Principal.equal(caller, listing.seller)) {
+          return (nextId, #err(#invalid_input("Cannot report your own listing")));
+        };
+        let newId = _appendAudit(
+          auditLog, nextId, "reportListing", caller,
+          ?listingId.toText(), reason,
+        );
+        (newId, #ok(()))
+      };
+    };
+  };
+
   // ─── User moderation ──────────────────────────────────────────────────────
 
   /// Suspend a user until `until` (nanoseconds timestamp). Admin or moderator.
@@ -561,6 +592,24 @@ module {
   };
 
   // ─── System settings ──────────────────────────────────────────────────────
+
+  /// Whether explorer API credentials are configured (never returns key values).
+  public func getExplorerApiKeyStatus(
+    users    : Map.Map<Types.UserId, Types.User>,
+    settings : SystemSettings,
+    caller   : Principal,
+  ) : {
+    tronGridConfigured : Bool;
+    bscScanConfigured  : Bool;
+    infuraConfigured   : Bool;
+  } {
+    ignore _requireAdminOrMod(users, caller);
+    {
+      tronGridConfigured = settings.tronGridApiKey != "";
+      bscScanConfigured  = settings.bscScanApiKey != "";
+      infuraConfigured   = settings.infuraApiKey != "";
+    };
+  };
 
   /// Read current system settings. Admin or moderator.
   public func getSystemSettings(

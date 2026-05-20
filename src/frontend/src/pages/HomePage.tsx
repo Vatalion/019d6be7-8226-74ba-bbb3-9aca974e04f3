@@ -8,7 +8,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useBackend } from "@/hooks/useBackend";
 import { useLocale } from "@/hooks/useLocale";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import {
   ArrowRight,
   FileText,
@@ -17,6 +17,8 @@ import {
   Sparkles,
   Wallet,
 } from "lucide-react";
+import { CategoryGrid } from "@/components/marketplace/CategoryGrid";
+import { searchListingsWithCategory } from "@/lib/marketplaceActor";
 import { motion } from "motion/react";
 
 // ─── featured listings hook ─────────────────────────────────────────────────
@@ -28,17 +30,19 @@ function useFeaturedListings() {
     queryFn: async () => {
       if (!actor) return [];
       try {
-        return await actor.searchListings(
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          0n,
-          6n,
-        );
+        return await searchListingsWithCategory(actor, {
+          query: null,
+          category: null,
+          categoryId: null,
+          priceMin: null,
+          priceMax: null,
+          location: null,
+          condition: null,
+          shippingCarrier: null,
+          offset: 0n,
+          limit: 6n,
+          priceToken: null,
+        });
       } catch (err) {
         console.warn("[useFeaturedListings] searchListings failed:", err);
         return [];
@@ -145,23 +149,16 @@ function HeroSection() {
           className="hidden lg:flex flex-wrap justify-center gap-2 mt-8"
           aria-label="Supported payment tokens"
         >
-          {[
-            "USDT · TRC20",
-            "USDT · BEP20",
-            "USDT · ERC20",
-            "USDT · Solana",
-            "USDC · ERC20",
-            "USDC · Solana",
-            "USDC · BEP20",
-            "USDC · Polygon",
-          ].map((token) => (
-            <span
-              key={token}
-              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-mono text-xs text-white font-medium border border-white/40 bg-white/20 backdrop-blur-sm"
-            >
-              {token}
-            </span>
-          ))}
+          {["USDT · TRC20", "USDT · BEP20", "USDT · ERC20", "USDC · ERC20"].map(
+            (token) => (
+              <span
+                key={token}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-mono text-xs text-white font-medium border border-white/40 bg-white/20 backdrop-blur-sm"
+              >
+                {token}
+              </span>
+            ),
+          )}
         </motion.div>
       </div>
     </section>
@@ -321,6 +318,16 @@ function HowItWorks() {
           <p className="text-muted-foreground max-w-lg mx-auto text-sm">
             {t("hiw.subtitle")}
           </p>
+          <p className="mt-3">
+            <Link
+              to="/"
+              hash="how-payments-work"
+              className="text-sm text-accent hover:underline"
+              data-ocid="hiw-payments-guide-link"
+            >
+              {t("paymentsGuide.learnMore")} →
+            </Link>
+          </p>
         </div>
 
         {/* Mobile: compact horizontal strip */}
@@ -383,6 +390,78 @@ function HowItWorks() {
   );
 }
 
+// ─── payments guide (hash target for footer / pre-route deploy) ─────────────
+
+function PaymentsGuideSection() {
+  const { t } = useLocale();
+
+  const phases = [
+    {
+      title: t("paymentsGuide.phase1.title"),
+      body: t("paymentsGuide.phase1.body"),
+      items: [
+        t("paymentsGuide.phase1.item1"),
+        t("paymentsGuide.phase1.item2"),
+        t("paymentsGuide.phase1.item3"),
+      ],
+    },
+    {
+      title: t("paymentsGuide.phase2.title"),
+      body: t("paymentsGuide.phase2.body"),
+      items: [
+        t("paymentsGuide.phase2.item1"),
+        t("paymentsGuide.phase2.item2"),
+      ],
+    },
+  ];
+
+  return (
+    <section
+      id="how-payments-work"
+      data-ocid="how-payments-work"
+      className="bg-background py-8 sm:py-14 border-t border-border scroll-mt-20"
+    >
+      <div className="max-w-3xl mx-auto px-3 sm:px-6 lg:px-8 space-y-6">
+        <div>
+          <h2 className="text-xl sm:text-2xl font-display font-bold text-foreground">
+            {t("paymentsGuide.title")}
+          </h2>
+          <p className="text-sm text-muted-foreground mt-2 leading-relaxed">
+            {t("paymentsGuide.intro")}
+          </p>
+        </div>
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/8 p-4 text-sm leading-relaxed">
+          {t("paymentsGuide.honestyBanner")}
+        </div>
+        {phases.map((phase, idx) => (
+          <div
+            key={phase.title}
+            className="card-elevated p-5 space-y-2"
+            data-ocid={`payments-guide-phase-${idx + 1}`}
+          >
+            <h3 className="font-semibold text-foreground">{phase.title}</h3>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              {phase.body}
+            </p>
+            <ul className="text-sm text-muted-foreground list-disc pl-5 space-y-1">
+              {phase.items.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        ))}
+        <Link
+          to="/how-payments-work"
+          className="text-sm text-accent hover:underline inline-block"
+          data-ocid="payments-guide-full-page-link"
+        >
+          {t("paymentsGuide.learnMore")} (full page) →
+        </Link>
+      </div>
+    </section>
+  );
+}
+
 // ─── trust banner ────────────────────────────────────────────────────────────
 
 function TrustBanner() {
@@ -434,9 +513,15 @@ export default function HomePage() {
   return (
     <div className="flex flex-col min-h-screen">
       <HeroSection />
+      <section className="bg-background py-8 sm:py-12">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+          <CategoryGrid />
+        </div>
+      </section>
       <FeaturedListings />
       <Separator className="bg-border/50" />
       <HowItWorks />
+      <PaymentsGuideSection />
       <TrustBanner />
     </div>
   );

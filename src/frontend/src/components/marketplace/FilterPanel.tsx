@@ -1,5 +1,6 @@
 import type { TradeToken } from "@/backend.d";
-import { ItemCondition, ListingCategory, ShippingCarrier } from "@/backend.d";
+import { ItemCondition, ShippingCarrier } from "@/backend.d";
+import { CategoryPicker } from "@/components/marketplace/CategoryPicker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,7 +10,7 @@ import { RotateCcw, SlidersHorizontal } from "lucide-react";
 import { useLocale } from "../../hooks/useLocale";
 
 export interface FilterState {
-  categories: ListingCategory[];
+  categoryId: number | null;
   conditions: ItemCondition[];
   carriers: ShippingCarrier[];
   priceMin: string;
@@ -82,15 +83,6 @@ export function FilterPanel({
 }: FilterPanelProps) {
   const { t } = useLocale();
 
-  const CATEGORIES: { value: ListingCategory; label: string }[] = [
-    { value: ListingCategory.electronics, label: t("category.electronics") },
-    { value: ListingCategory.clothing, label: t("category.clothing") },
-    { value: ListingCategory.books, label: t("category.books") },
-    { value: ListingCategory.digital, label: t("category.digital") },
-    { value: ListingCategory.services, label: t("category.services") },
-    { value: ListingCategory.other, label: t("category.other") },
-  ];
-
   const CONDITIONS: { value: ItemCondition; label: string }[] = [
     { value: ItemCondition.new_, label: t("condition.new") },
     { value: ItemCondition.likeNew, label: t("condition.likeNew") },
@@ -110,9 +102,6 @@ export function FilterPanel({
     { value: "USDT_ERC20" as TradeToken, key: "filter.token.USDT_ERC20" },
     { value: "USDC_ERC20" as TradeToken, key: "filter.token.USDC_ERC20" },
   ];
-
-  const updateCategories = (cat: ListingCategory) =>
-    onChange({ ...filters, categories: setOne(filters.categories, cat) });
 
   const updateConditions = (cond: ItemCondition) =>
     onChange({ ...filters, conditions: setOne(filters.conditions, cond) });
@@ -174,27 +163,13 @@ export function FilterPanel({
 
       <Separator />
 
-      {/* Category — single-select radio */}
       <FilterSection title={t("filter.category")}>
-        <div className="space-y-2" data-ocid="filter-category">
-          <RadioOption
-            id="cat-any"
-            label={t("filter.any")}
-            checked={filters.categories.length === 0}
-            onChange={() => onChange({ ...filters, categories: [] })}
-            ocid="filter-category-any"
-          />
-          {CATEGORIES.map(({ value, label }) => (
-            <RadioOption
-              key={value}
-              id={`cat-${value}`}
-              label={label}
-              checked={filters.categories[0] === value}
-              onChange={() => updateCategories(value)}
-              ocid={`filter-category-${value}`}
-            />
-          ))}
-        </div>
+        <CategoryPicker
+          valueId={filters.categoryId}
+          onChange={(id) => onChange({ ...filters, categoryId: id })}
+          l1Ocid="filter-category-l1"
+          l2Ocid="filter-category-l2"
+        />
       </FilterSection>
 
       <Separator />

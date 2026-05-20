@@ -42,6 +42,15 @@ export interface CarrierInfo {
   'description' : string,
   'carrier' : ShippingCarrier,
 }
+export type CategoryId = bigint;
+export interface CategoryNode {
+  'id' : CategoryId,
+  'labelEn' : string,
+  'labelUk' : string,
+  'slug' : string,
+  'legacyCategory' : ListingCategory,
+  'parentId' : [] | [CategoryId],
+}
 export type ChainType = { 'SPL' : null } |
   { 'BEP20' : null } |
   { 'TRC20' : null } |
@@ -53,6 +62,10 @@ export interface ComplianceNote {
   'note' : string,
   'actorId' : Principal,
   'timestamp' : Timestamp,
+}
+export interface CreateCertificateResult {
+  'method' : string,
+  'blob_hash' : string,
 }
 export interface CyclesStatus {
   'isWarning' : boolean,
@@ -198,13 +211,16 @@ export interface LinkPreview {
 }
 export interface ListingCard {
   'id' : ListingId,
+  'categoryId' : CategoryId,
   'title' : string,
   'sellerPrincipal' : UserId,
   'priceAmount' : bigint,
+  'categorySlug' : string,
   'shippingMethods' : Array<ShippingMethod>,
   'createdAt' : Timestamp,
   'description' : string,
   'sellerTrustLevel' : TrustLevel,
+  'isPromoted' : boolean,
   'sellerRating' : bigint,
   'priceToken' : TradeToken,
   'category' : ListingCategory,
@@ -221,6 +237,15 @@ export type ListingCategory = { 'clothing' : null } |
   { 'services' : null } |
   { 'electronics' : null };
 export type ListingId = bigint;
+export type ListingInquiryId = bigint;
+export interface ListingInquiryMessage {
+  'id' : ListingInquiryMessageId,
+  'content' : string,
+  'createdAt' : Timestamp,
+  'sender' : UserId,
+  'inquiryId' : ListingInquiryId,
+}
+export type ListingInquiryMessageId = bigint;
 export interface MediaAttachment {
   'url' : string,
   'mimeType' : string,
@@ -382,11 +407,15 @@ export type Result_1 = {
     'ok' : { 'active' : boolean, 'txCount' : bigint, 'verifiedAt' : Timestamp }
   } |
   { 'err' : Error };
-export type Result_10 = { 'ok' : FeedbackId } |
+export type Result_10 = { 'ok' : boolean } |
   { 'err' : Error };
-export type Result_11 = { 'ok' : TradeId } |
+export type Result_11 = { 'ok' : DisputeId } |
   { 'err' : Error };
-export type Result_12 = {
+export type Result_12 = { 'ok' : FeedbackId } |
+  { 'err' : Error };
+export type Result_13 = { 'ok' : TradeId } |
+  { 'err' : Error };
+export type Result_14 = {
     'ok' : {
       'status' : string,
       'trackingNumber' : string,
@@ -397,50 +426,60 @@ export type Result_12 = {
     }
   } |
   { 'err' : Error };
-export type Result_13 = {
+export type Result_15 = {
     'ok' : Array<{ 'name' : string, 'address' : string, 'index' : string }>
   } |
   { 'err' : Error };
-export type Result_14 = { 'ok' : bigint } |
+export type Result_16 = { 'ok' : bigint } |
   { 'err' : Error };
-export type Result_15 = { 'ok' : Array<DisputeView> } |
+export type Result_17 = { 'ok' : Array<DisputeView> } |
   { 'err' : Error };
-export type Result_16 = { 'ok' : Array<NovaPoshtaBranch> } |
+export type Result_18 = { 'ok' : Array<NovaPoshtaBranch> } |
   { 'err' : Error };
-export type Result_17 = { 'ok' : Array<JurorDashboardEntry> } |
+export type Result_19 = { 'ok' : Array<JurorDashboardEntry> } |
   { 'err' : Error };
-export type Result_18 = {
+export type Result_2 = { 'ok' : PaymentVerificationResult } |
+  { 'err' : Error };
+export type Result_20 = {
     'ok' : Array<
       { 'id' : string, 'name' : string, 'type' : string, 'address' : string }
     >
   } |
   { 'err' : Error };
-export type Result_19 = { 'ok' : LinkPreview } |
+export type Result_21 = { 'ok' : Array<ListingInquiryMessage> } |
   { 'err' : Error };
-export type Result_2 = { 'ok' : PaymentVerificationResult } |
+export type Result_22 = { 'ok' : LinkPreview } |
   { 'err' : Error };
-export type Result_20 = { 'ok' : Array<JurorStats> } |
+export type Result_23 = { 'ok' : Array<JurorStats> } |
   { 'err' : Error };
-export type Result_21 = { 'ok' : DigitalDelivery } |
+export type Result_24 = { 'ok' : DigitalDelivery } |
   { 'err' : Error };
-export type Result_22 = { 'ok' : ProposalId } |
+export type Result_25 = { 'ok' : ProposalId } |
   { 'err' : Error };
-export type Result_23 = { 'ok' : ListingCard } |
+export type Result_26 = { 'ok' : ListingCard } |
   { 'err' : Error };
-export type Result_24 = { 'ok' : ProposalStatus } |
+export type Result_27 = { 'ok' : ProposalStatus } |
   { 'err' : Error };
-export type Result_25 = { 'ok' : PaymentMethod } |
+export type Result_28 = { 'ok' : PaymentMethod } |
   { 'err' : Error };
 export type Result_5 = { 'ok' : UserProfile } |
   { 'err' : Error };
 export type Result_6 = { 'ok' : Message } |
   { 'err' : Error };
-export type Result_7 = { 'ok' : string } |
+export type Result_7 = { 'ok' : ListingInquiryMessage } |
   { 'err' : Error };
-export type Result_8 = { 'ok' : boolean } |
+export type Result_8 = { 'ok' : SavedSearch } |
   { 'err' : Error };
-export type Result_9 = { 'ok' : DisputeId } |
+export type Result_9 = { 'ok' : string } |
   { 'err' : Error };
+export interface SavedSearch {
+  'id' : SavedSearchId,
+  'owner' : UserId,
+  'paramsJson' : string,
+  'name' : string,
+  'createdAt' : Timestamp,
+}
+export type SavedSearchId = bigint;
 export type ShippingCarrier = { 'meest' : null } |
   { 'nova_poshta' : null } |
   { 'self_pickup' : null } |
@@ -593,7 +632,11 @@ export interface _SERVICE {
     [Array<Uint8Array>],
     undefined
   >,
-  '_immutableObjectStorageCreateCertificate' : ActorMethod<[string], undefined>,
+  '_immutableObjectStorageCreateCertificate' : ActorMethod<
+    [string],
+    CreateCertificateResult
+  >,
+  '_immutableObjectStorageUpdateGatewayPrincipals' : ActorMethod<[], undefined>,
   '_transformResponse' : ActorMethod<
     [
       {
@@ -613,13 +656,16 @@ export interface _SERVICE {
   >,
   'addComplianceNote' : ActorMethod<[UserId, string], undefined>,
   'addEvidence' : ActorMethod<[DisputeId, Array<MediaAttachment>], Result>,
+  'addFavorite' : ActorMethod<[ListingId], Result>,
   'addModeratorNote' : ActorMethod<[DisputeId, string], Result>,
-  'addPaymentMethod' : ActorMethod<[TradeToken, string, boolean], Result_25>,
+  'addPaymentMethod' : ActorMethod<[TradeToken, string, boolean], Result_28>,
   'adminGetAllTrades' : ActorMethod<[], Array<TradeView>>,
+  'adminPromoteListing' : ActorMethod<[ListingId], Result>,
   'adminRemoveListing' : ActorMethod<[ListingId, string], Result>,
   'appealDispute' : ActorMethod<[DisputeId, string], Result>,
   'assignJurors' : ActorMethod<[DisputeId], Result>,
   'banUser' : ActorMethod<[UserId, string], undefined>,
+  'bumpListing' : ActorMethod<[ListingId], Result>,
   'calculateShippingCost' : ActorMethod<
     [string, string, number, ShippingServiceType],
     { 'ok' : { 'transitDays' : bigint, 'costUAH' : bigint } } |
@@ -628,7 +674,7 @@ export interface _SERVICE {
   'canConfirmDelivery' : ActorMethod<[TradeId], boolean>,
   'castJurorVote' : ActorMethod<[DisputeId, JurorVoteChoice, string], Result>,
   'checkAndExpireTimeouts' : ActorMethod<[], bigint>,
-  'checkDigitalInspectionDeadline' : ActorMethod<[TradeId], Result_8>,
+  'checkDigitalInspectionDeadline' : ActorMethod<[TradeId], Result_10>,
   'checkJuryDeadlines' : ActorMethod<[], bigint>,
   'cleanupResolvedListings' : ActorMethod<
     [],
@@ -638,7 +684,7 @@ export interface _SERVICE {
       'photosToDelete' : Array<string>,
     }
   >,
-  'closeProposal' : ActorMethod<[ProposalId], Result_24>,
+  'closeProposal' : ActorMethod<[ProposalId], Result_27>,
   'confirmPaymentReceived' : ActorMethod<[TradeId], Result>,
   'confirmPaymentSent' : ActorMethod<[TradeId], Result>,
   'createListing' : ActorMethod<
@@ -646,6 +692,7 @@ export interface _SERVICE {
       string,
       string,
       ListingCategory,
+      [] | [CategoryId],
       bigint,
       TradeToken,
       ItemCondition,
@@ -661,32 +708,29 @@ export interface _SERVICE {
       [] | [UkrposhtaConfig],
       [] | [MeestConfig],
     ],
-    Result_23
+    Result_26
   >,
-  'createMeestTTN' : ActorMethod<[TradeId], Result_7>,
+  'createMeestTTN' : ActorMethod<[TradeId], Result_9>,
   'createMeestWaybill' : ActorMethod<
     [string, string, number, string, bigint],
     { 'ok' : string } |
       { 'err' : string }
   >,
-  'createNovaPoshtaTTN' : ActorMethod<[TradeId], Result_7>,
-  'createProposal' : ActorMethod<[ProposalType, string], Result_22>,
+  'createNovaPoshtaTTN' : ActorMethod<[TradeId], Result_9>,
+  'createProposal' : ActorMethod<[ProposalType, string], Result_25>,
   'createUkrPoshtaWaybill' : ActorMethod<
     [string, string, number, string, bigint],
     { 'ok' : string } |
       { 'err' : string }
   >,
-  'createUkrposhtaTTN' : ActorMethod<[TradeId], Result_7>,
+  'createUkrposhtaTTN' : ActorMethod<[TradeId], Result_9>,
   'createWaybill' : ActorMethod<
     [string, string, number, string, bigint, ShippingServiceType],
     { 'ok' : string } |
       { 'err' : string }
   >,
   'deactivateListing' : ActorMethod<[ListingId], Result>,
-  'debugGetCertifiedData' : ActorMethod<[], [] | [Uint8Array]>,
-  /**
-   * / This canister's own principal — used as the escrow recipient in ICRC-2 transfers.
-   */
+  'deleteSavedSearch' : ActorMethod<[SavedSearchId], Result>,
   'demoteFromModerator' : ActorMethod<[UserId], undefined>,
   'estimateTokenAmount' : ActorMethod<[bigint, TradeToken], [] | [bigint]>,
   'executeProposal' : ActorMethod<[ProposalId], Result>,
@@ -696,7 +740,7 @@ export interface _SERVICE {
   'getComplianceNotes' : ActorMethod<[UserId], Array<ComplianceNote>>,
   'getCyclesStatus' : ActorMethod<[], CyclesStatus>,
   'getDashboardMetrics' : ActorMethod<[], PlatformMetrics__1>,
-  'getDigitalDelivery' : ActorMethod<[TradeId], Result_21>,
+  'getDigitalDelivery' : ActorMethod<[TradeId], Result_24>,
   'getDispute' : ActorMethod<[DisputeId], [] | [DisputeView]>,
   'getDisputeJurors' : ActorMethod<[DisputeId], [] | [JuryView]>,
   'getDisputesByTrade' : ActorMethod<[TradeId], Array<DisputeView>>,
@@ -704,25 +748,38 @@ export interface _SERVICE {
   'getErrorLog' : ActorMethod<[bigint, [] | [string]], Array<ErrorLogEntry>>,
   'getExecutionHistory' : ActorMethod<[], Array<ProposalView>>,
   'getExpiredListings' : ActorMethod<[bigint, bigint], Array<ListingCard>>,
+  'getExplorerApiKeyStatus' : ActorMethod<
+    [],
+    {
+      'bscScanConfigured' : boolean,
+      'infuraConfigured' : boolean,
+      'tronGridConfigured' : boolean,
+    }
+  >,
+  'getFavoriteListings' : ActorMethod<[], Array<ListingCard>>,
+  /**
+   * / This canister's own principal — used as the escrow recipient in ICRC-2 transfers.
+   */
   'getFeedbackForTrade' : ActorMethod<[TradeId], Array<Feedback>>,
   'getJurorDashboard' : ActorMethod<[], Array<JurorDashboardEntry>>,
-  'getJuryPool' : ActorMethod<[], Result_20>,
-  'getLinkPreview' : ActorMethod<[string], Result_19>,
+  'getJuryPool' : ActorMethod<[], Result_23>,
+  'getLinkPreview' : ActorMethod<[string], Result_22>,
   'getListing' : ActorMethod<[ListingId], [] | [ListingCard]>,
+  'getListingInquiryMessages' : ActorMethod<[ListingId, UserId], Result_21>,
   'getListingsByUser' : ActorMethod<
     [UserId, bigint, bigint],
     Array<ListingCard>
   >,
   'getMeestPUDOs' : ActorMethod<
     [string, [] | [string], [] | [bigint]],
-    Result_18
+    Result_20
   >,
   'getMetricsSummary' : ActorMethod<[], MetricsSummary>,
   'getModeratorThread' : ActorMethod<[TradeId], Array<Message>>,
   'getModuleMetrics' : ActorMethod<[], Array<ModuleMetricsView>>,
   'getMyDisputes' : ActorMethod<[], Array<DisputeView>>,
   'getMyFeedback' : ActorMethod<[], Array<Feedback>>,
-  'getMyJurorDashboard' : ActorMethod<[], Result_17>,
+  'getMyJurorDashboard' : ActorMethod<[], Result_19>,
   'getMyListings' : ActorMethod<[bigint, bigint], Array<ListingCard>>,
   'getMyPaymentMethods' : ActorMethod<[], Array<PaymentMethod>>,
   'getMyProfile' : ActorMethod<[], [] | [UserProfile]>,
@@ -736,10 +793,10 @@ export interface _SERVICE {
   >,
   'getNovaPoshtaBranches' : ActorMethod<
     [string, [] | [string], [] | [bigint]],
-    Result_16
+    Result_18
   >,
-  'getNovaPoshtaCityRef' : ActorMethod<[string], Result_7>,
-  'getOpenDisputeQueue' : ActorMethod<[bigint, bigint], Result_15>,
+  'getNovaPoshtaCityRef' : ActorMethod<[string], Result_9>,
+  'getOpenDisputeQueue' : ActorMethod<[bigint, bigint], Result_17>,
   'getP95Latency' : ActorMethod<[string, bigint], bigint>,
   'getPaymentMethods' : ActorMethod<[], Array<PaymentMethod>>,
   'getPaymentVerificationStatus' : ActorMethod<
@@ -750,7 +807,8 @@ export interface _SERVICE {
   'getProposal' : ActorMethod<[ProposalId], [] | [ProposalView]>,
   'getProposals' : ActorMethod<[[] | [ProposalStatus]], Array<ProposalView>>,
   'getRequestRate' : ActorMethod<[string, bigint], bigint>,
-  'getSellerLiability' : ActorMethod<[Principal], Result_14>,
+  'getSavedSearches' : ActorMethod<[], Array<SavedSearch>>,
+  'getSellerLiability' : ActorMethod<[Principal], Result_16>,
   'getShippingOptions' : ActorMethod<
     [number, string, string],
     { 'ok' : Array<ShippingOption> } |
@@ -771,9 +829,6 @@ export interface _SERVICE {
   >,
   'getTokenInfo' : ActorMethod<[TradeToken], [] | [TokenInfo]>,
   'getTrade' : ActorMethod<[TradeId], [] | [TradeView]>,
-  /**
-   * / Rolling request metrics log — FIFO, capacity 10 000.
-   */
   'getTradeMessages' : ActorMethod<[TradeId, bigint, bigint], Array<Message>>,
   'getTradeNotifications' : ActorMethod<[], Array<NotificationEvent>>,
   'getTradePaymentStatus' : ActorMethod<[TradeId], [] | [TradePaymentStatus]>,
@@ -786,9 +841,9 @@ export interface _SERVICE {
   'getTreasuryWithdrawals' : ActorMethod<[], Array<WithdrawalRecord>>,
   'getUkrposhtaOffices' : ActorMethod<
     [string, [] | [string], [] | [bigint]],
-    Result_13
+    Result_15
   >,
-  'getUnifiedTrackingInfo' : ActorMethod<[TradeId], Result_12>,
+  'getUnifiedTrackingInfo' : ActorMethod<[TradeId], Result_14>,
   'getUnreadCount' : ActorMethod<[], Array<[TradeId, bigint]>>,
   'getUserFeedback' : ActorMethod<[UserId], Array<Feedback>>,
   'getUserProfile' : ActorMethod<[Principal], [] | [UserProfile]>,
@@ -798,41 +853,53 @@ export interface _SERVICE {
   'incrementListingView' : ActorMethod<[ListingId], undefined>,
   'initiateOnChainTrade' : ActorMethod<
     [ListingId, TradeToken, [] | [ShippingSelection]],
-    Result_11
+    Result_13
   >,
   'initiateTrade' : ActorMethod<
     [ListingId, TradeToken, [] | [ShippingSelection]],
-    Result_11
+    Result_13
   >,
-  'leaveFeedback' : ActorMethod<[TradeId, UserId, bigint, string], Result_10>,
+  'isListingFavorite' : ActorMethod<[ListingId], boolean>,
+  'leaveFeedback' : ActorMethod<[TradeId, UserId, bigint, string], Result_12>,
+  'listCategories' : ActorMethod<[], Array<CategoryNode>>,
   'markAllNotificationsRead' : ActorMethod<[], Result>,
   'markNotificationRead' : ActorMethod<[bigint], Result>,
   'markTradeAsRead' : ActorMethod<[TradeId], undefined>,
-  'openDigitalDispute' : ActorMethod<[TradeId, string], Result_9>,
-  'openDispute' : ActorMethod<[TradeId, DisputeReason, string], Result_9>,
+  'openDigitalDispute' : ActorMethod<[TradeId, string], Result_11>,
+  'openDispute' : ActorMethod<[TradeId, DisputeReason, string], Result_11>,
   'promoteToModerator' : ActorMethod<[UserId], undefined>,
-  'proposeCancelTrade' : ActorMethod<[TradeId], Result_8>,
+  'proposeCancelTrade' : ActorMethod<[TradeId], Result_10>,
   'reactivateListing' : ActorMethod<[ListingId], Result>,
   'recordRequest' : ActorMethod<[string, bigint, bigint], undefined>,
+  /**
+   * / This canister's own principal — used as the escrow recipient in ICRC-2 transfers.
+   */
   'recordTreasuryFee' : ActorMethod<[TradeId, bigint, TradeToken], undefined>,
   'refreshRates' : ActorMethod<[], bigint>,
+  /**
+   * / This canister's own principal — used as the escrow recipient in ICRC-2 transfers.
+   */
   'refreshVaultBalance' : ActorMethod<[ChainType], BalanceView>,
   'registerAsJuror' : ActorMethod<[number], Result>,
+  'removeFavorite' : ActorMethod<[ListingId], Result>,
   'removeListingByAdmin' : ActorMethod<[ListingId, string], undefined>,
   'reopenDispute' : ActorMethod<[DisputeId], Result>,
+  'reportListing' : ActorMethod<[ListingId, string], Result>,
   'requestRefund' : ActorMethod<[TradeId], Result>,
   'resolveDispute' : ActorMethod<
     [DisputeId, ResolutionOutcome, string],
     Result
   >,
   'resolveDisputeEscrow' : ActorMethod<[DisputeId, ResolutionOutcome], Result>,
-  'retryMeestTTNCreation' : ActorMethod<[TradeId], Result_7>,
-  'retryTTNCreation' : ActorMethod<[TradeId], Result_7>,
-  'retryUkrposhtaTTNCreation' : ActorMethod<[TradeId], Result_7>,
+  'retryMeestTTNCreation' : ActorMethod<[TradeId], Result_9>,
+  'retryTTNCreation' : ActorMethod<[TradeId], Result_9>,
+  'retryUkrposhtaTTNCreation' : ActorMethod<[TradeId], Result_9>,
+  'saveSearch' : ActorMethod<[string, string], Result_8>,
   'searchListings' : ActorMethod<
     [
       [] | [string],
       [] | [ListingCategory],
+      [] | [CategoryId],
       [] | [bigint],
       [] | [bigint],
       [] | [string],
@@ -840,8 +907,14 @@ export interface _SERVICE {
       [] | [ShippingCarrier],
       bigint,
       bigint,
+      [] | [TradeToken],
     ],
     Array<ListingCard>
+  >,
+  'sendListingInquiry' : ActorMethod<[ListingId, string], Result_7>,
+  'sendListingInquiryReply' : ActorMethod<
+    [ListingId, UserId, string],
+    Result_7
   >,
   'sendMessage' : ActorMethod<
     [TradeId, string, Array<MediaAttachment>],
@@ -890,6 +963,7 @@ export interface _SERVICE {
       string,
       string,
       ListingCategory,
+      [] | [CategoryId],
       bigint,
       TradeToken,
       ItemCondition,
@@ -906,6 +980,9 @@ export interface _SERVICE {
     ],
     Result
   >,
+  /**
+   * / Rolling request metrics log — FIFO, capacity 10 000.
+   */
   'updateSystemSettings' : ActorMethod<
     [bigint, bigint, Array<TradeToken>, bigint, bigint, number],
     undefined

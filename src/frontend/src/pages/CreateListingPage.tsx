@@ -51,6 +51,13 @@ import { ShippingProviderSelector } from "../components/shared/ShippingProviderS
 import { useAuth } from "../hooks/useAuth";
 import { useUploadFile } from "../hooks/useBackend";
 import { useLocale } from "../hooks/useLocale";
+import { CategoryPicker } from "@/components/marketplace/CategoryPicker";
+import {
+  categoryLabel,
+  getCategoryById,
+  legacyToListingCategoryKey,
+} from "@/data/olxCategories";
+import { asMarketplaceActor, optNat } from "@/lib/marketplaceActor";
 import { detectLocale, t } from "../i18n";
 import {
   ACTIVE_PHYSICAL_SHIPPING_CARRIER,
@@ -77,6 +84,7 @@ interface PhotoItem {
 interface FormState {
   title: string;
   category: ListingCategory | "";
+  categoryId: number | null;
   condition: ItemCondition | "";
   description: string;
   isDigital: boolean;
@@ -598,15 +606,6 @@ export default function CreateListingPage() {
   const locale = detectLocale();
   const { t: tl } = useLocale();
 
-  const CATEGORIES: { value: ListingCategory; label: string }[] = [
-    { value: ListingCategory.electronics, label: tl("category.electronics") },
-    { value: ListingCategory.clothing, label: tl("category.clothing") },
-    { value: ListingCategory.books, label: tl("category.books") },
-    { value: ListingCategory.digital, label: tl("category.digital") },
-    { value: ListingCategory.services, label: tl("category.services") },
-    { value: ListingCategory.other, label: tl("category.other") },
-  ];
-
   const CONDITIONS: { value: ItemCondition; label: string; desc: string }[] = [
     {
       value: ItemCondition.new_,
@@ -659,6 +658,7 @@ export default function CreateListingPage() {
   const [form, setForm] = useState<FormState>({
     title: "",
     category: "",
+    categoryId: null,
     condition: "",
     description: "",
     isDigital: false,
@@ -860,6 +860,14 @@ export default function CreateListingPage() {
         rawMsg.includes("network")
       ) {
         return t(locale, "upload.errorNetwork");
+      }
+      if (
+        rawMsg.toLowerCase().includes("budget") ||
+        rawMsg.toLowerCase().includes("payment") ||
+        rawMsg.includes("402") ||
+        rawMsg.toLowerCase().includes("insufficient")
+      ) {
+        return t(locale, "upload.errorBudget");
       }
       if (
         rawMsg.includes("CANISTER_ID_BACKEND не налаштовано") ||
@@ -1087,7 +1095,7 @@ export default function CreateListingPage() {
         errs.title = t(locale, "validation.title.min");
       else if (form.title.length > MAX_TITLE)
         errs.title = t(locale, "validation.title.max");
-      if (!form.category) errs.category = tl("create.validation.category");
+      if (form.categoryId == null) errs.category = tl("create.validation.category");
       if (!form.condition) errs.condition = tl("create.validation.condition");
       if (!form.description.trim())
         errs.description = tl("create.validation.description");
@@ -1335,16 +1343,20 @@ export default function CreateListingPage() {
       const meestConfigPayload: MeestConfigType | null = null;
 
       // Helper: support both __kind__-based and plain {ok}/{err} Candid variants
-      const isErr = (r: { __kind__?: string; ok?: unknown; err?: unknown }) =>
-        r.__kind__ === "err" || (r.__kind__ === undefined && "err" in r);
+      const isErr = (r: unknown) => {
+        const x = r as { __kind__?: string; ok?: unknown; err?: unknown };
+        return x.__kind__ === "err" || (x.__kind__ === undefined && "err" in x);
+      };
 
       if (isEditMode && editId) {
         console.log("[CreateListing] calling actor.updateListing");
-        const res = await actor.updateListing(
+        const mp = asMarketplaceActor(actor);
+        const res = await mp.updateListing(
           BigInt(editId),
           form.title.trim(),
           form.description.trim(),
           form.category as ListingCategory,
+          optNat(form.categoryId),
           priceAmt,
           form.priceToken,
           form.condition as ItemCondition,
@@ -1403,15 +1415,18 @@ export default function CreateListingPage() {
           await queryClient.invalidateQueries({
             queryKey: ["listing", editId],
           });
+          await queryClient.invalidateQueries({ queryKey: ["listings"] });
           await queryClient.invalidateQueries({ queryKey: ["myListings"] });
           navigate({ to: "/listings/$id", params: { id: editId! } });
         }
       } else {
         console.log("[CreateListing] calling actor.createListing");
-        const res = await actor.createListing(
+        const mp = asMarketplaceActor(actor);
+        const res = await mp.createListing(
           form.title.trim(),
           form.description.trim(),
           form.category as ListingCategory,
+          optNat(form.categoryId),
           priceAmt,
           form.priceToken,
           form.condition as ItemCondition,
@@ -1667,31 +1682,22 @@ export default function CreateListingPage() {
                   )}
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="category" className="text-label">
-                    {tl("create.field.category")}
-                  </Label>
-                  <Select
-                    value={form.category}
-                    onValueChange={(v) => set("category", v as ListingCategory)}
-                  >
-                    <SelectTrigger
-                      id="category"
-                      className={errors.category ? "border-destructive" : ""}
-                      data-ocid="select-category"
-                    >
-                      <SelectValue
-                        placeholder={tl("create.placeholder.category")}
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {CATEGORIES.map((c) => (
-                        <SelectItem key={c.value} value={c.value}>
-                          {c.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div className="space-y-2" data-ocid="select-category">
+                  <Label className="text-label">{tl("create.field.category")}</Label>
+                  <CategoryPicker
+                    valueId={form.categoryId}
+                    allowAny={false}
+                    onChange={(id, node) => {
+                      setForm((f) => ({
+                        ...f,
+                        categoryId: id,
+                        category: node
+                          ? (legacyToListingCategoryKey(node.legacy) as ListingCategory)
+                          : "",
+                        isDigital: node?.slug.includes("tsifrovye") ?? f.isDigital,
+                      }));
+                    }}
+                  />
                   {errors.category && (
                     <p className="text-xs text-destructive flex items-center gap-1">
                       <AlertCircle className="w-3.5 h-3.5" />
@@ -1813,6 +1819,15 @@ export default function CreateListingPage() {
                         <p className="text-xs text-destructive flex items-center gap-1">
                           <AlertCircle className="w-3.5 h-3.5" />
                           {errors.digitalFileUrl}
+                        </p>
+                      )}
+                      {form.digitalFileUrl.trim() && (
+                        <p
+                          className="flex items-center gap-1.5 text-xs text-primary/80 mt-0.5"
+                          data-ocid="digital-encryption-notice"
+                        >
+                          <Lock className="w-3 h-3 shrink-0" />
+                          {tl("digital.encryptionNotice")}
                         </p>
                       )}
                     </div>
@@ -2116,8 +2131,12 @@ export default function CreateListingPage() {
                       {tl("create.field.category")}
                     </span>
                     <span className="font-medium text-foreground">
-                      {CATEGORIES.find((c) => c.value === form.category)
-                        ?.label ?? "—"}
+                      {form.categoryId != null
+                        ? categoryLabel(
+                            getCategoryById(form.categoryId)!,
+                            locale === "uk" ? "uk" : "en",
+                          )
+                        : "—"}
                     </span>
                     <span className="text-muted-foreground">
                       {tl("create.field.condition")}

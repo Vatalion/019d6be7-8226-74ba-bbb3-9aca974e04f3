@@ -56,6 +56,9 @@ export interface ListingCard {
     sellerRating: bigint;
     priceToken: TradeToken;
     category: ListingCategory;
+    categoryId: bigint;
+    categorySlug: string;
+    isPromoted: boolean;
     sellerUsername: string;
     location: string;
     photos: Array<string>;
@@ -847,7 +850,8 @@ export interface backendInterface {
     deactivateListing(id: ListingId): Promise<Result>;
     debugGetCertifiedData(): Promise<Uint8Array | null>;
     /**
-     * / This canister's own principal — used as the escrow recipient in ICRC-2 transfers.
+     * / Treasury principal — receives 1% platform fee on every ICRC-1 trade.
+     * / Defaults to anonymous() until admin sets it.
      */
     demoteFromModerator(target: UserId): Promise<void>;
     estimateTokenAmount(usdCents: bigint, token: TradeToken): Promise<bigint | null>;
@@ -912,11 +916,13 @@ export interface backendInterface {
         minTradeAmountUSD: bigint;
         errorRateThreshold: number;
     }>;
+    getExplorerApiKeyStatus(): Promise<{
+        tronGridConfigured: boolean;
+        bscScanConfigured: boolean;
+        infuraConfigured: boolean;
+    }>;
     getTokenInfo(token: TradeToken): Promise<TokenInfo | null>;
     getTrade(tradeId: TradeId): Promise<TradeView | null>;
-    /**
-     * / Rolling request metrics log — FIFO, capacity 10 000.
-     */
     getTradeMessages(tradeId: TradeId, offset: bigint, limit: bigint): Promise<Array<Message>>;
     getTradeNotifications(): Promise<Array<NotificationEvent>>;
     getTradePaymentStatus(tradeId: TradeId): Promise<TradePaymentStatus | null>;
@@ -947,12 +953,23 @@ export interface backendInterface {
     promoteToModerator(target: UserId): Promise<void>;
     proposeCancelTrade(tradeId: TradeId): Promise<Result_8>;
     reactivateListing(id: ListingId): Promise<Result>;
+    reportListing(listingId: ListingId, reason: string): Promise<Result>;
     recordRequest(endpoint: string, durationMs: bigint, status: bigint): Promise<void>;
     recordTreasuryFee(tradeId: TradeId, amount: bigint, token: TradeToken): Promise<void>;
     refreshRates(): Promise<bigint>;
     refreshVaultBalance(chain: ChainType): Promise<BalanceView>;
     registerAsJuror(stake: number): Promise<Result>;
     removeListingByAdmin(listingId: ListingId, reason: string): Promise<void>;
+    reportListing(
+        listingId: ListingId,
+        reason: string,
+    ): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
     reopenDispute(disputeId: DisputeId): Promise<Result>;
     requestRefund(tradeId: TradeId): Promise<Result>;
     resolveDispute(disputeId: DisputeId, outcome: ResolutionOutcome, notes: string): Promise<Result>;
@@ -960,7 +977,7 @@ export interface backendInterface {
     retryMeestTTNCreation(tradeId: TradeId): Promise<Result_7>;
     retryTTNCreation(tradeId: TradeId): Promise<Result_7>;
     retryUkrposhtaTTNCreation(tradeId: TradeId): Promise<Result_7>;
-    searchListings(query: string | null, category: ListingCategory | null, priceMin: bigint | null, priceMax: bigint | null, location: string | null, condition: ItemCondition | null, shippingCarrier: ShippingCarrier | null, offset: bigint, limit: bigint): Promise<Array<ListingCard>>;
+    searchListings(query: string | null, category: ListingCategory | null, priceMin: bigint | null, priceMax: bigint | null, location: string | null, condition: ItemCondition | null, shippingCarrier: ShippingCarrier | null, offset: bigint, limit: bigint, priceToken: TradeToken | null): Promise<Array<ListingCard>>;
     sendMessage(tradeId: TradeId, content: string, attachments: Array<MediaAttachment>): Promise<Result_6>;
     setAvalancheApiKey(apiKey: string): Promise<void>;
     setBscScanApiKey(apiKey: string): Promise<void>;

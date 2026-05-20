@@ -356,10 +356,37 @@ async function loadEnvConfig(): Promise<EnvConfig> {
 // 2. HttpAgent host is explicitly set from runtime env.json, falling back to IC mainnet.
 // 3. Identity is always passed to the HttpAgent constructor BEFORE StorageClient
 //    is created. Anonymous agents cannot receive v3 certified responses.
-// 4. StorageClient.getCertificate is patched only to pass the current identity
-//    explicitly and then preserves the library's original v3 certificate shape.
-// 5. StorageClient is cached per principal text; rebuilt when identity changes.
+// 4. Backend uses Caffeine `MixinObjectStorage` — certificate is the v3 IC
+//    response body from `_immutableObjectStorageCreateCertificate` (returns
+//    { method: "upload"; blob_hash }, NOT CertifiedData.set).
+// 5. StorageClient.getCertificate is patched to pass identity at the call site.
+// 6. StorageClient is cached per principal text; rebuilt when identity changes.
 // ---------------------------------------------------------------------------
+
+let storageGatewayPrincipalsSynced = false;
+
+async function syncStorageGatewayPrincipals(
+  agent: HttpAgent,
+  canisterId: string,
+  identity: Identity,
+): Promise<void> {
+  if (storageGatewayPrincipalsSynced) return;
+  try {
+    await agent.call(
+      canisterId,
+      {
+        methodName: "_immutableObjectStorageUpdateGatewayPrincipals",
+        arg: IDL.encode([], []),
+      },
+      identity,
+    );
+    storageGatewayPrincipalsSynced = true;
+    console.log("[useUploadFile] Gateway principals synced");
+  } catch (e) {
+    // Non-fatal: Caffeine production canisters have CAFFFEINE_STORAGE_CASHIER_PRINCIPAL set.
+    console.warn("[useUploadFile] Gateway principal sync skipped:", e);
+  }
+}
 
 export function useUploadFile(identity: Identity | undefined): {
   uploadFile: (
@@ -454,14 +481,19 @@ export function useUploadFile(identity: Identity | undefined): {
           const patchCanisterId = envConfig.backend_canister_id;
           const patchIdentity = currentIdentity;
 
+          await syncStorageGatewayPrincipals(
+            agent,
+            envConfig.backend_canister_id,
+            currentIdentity,
+          );
+
           // The cast bypasses the 'private' access modifier — necessary because
-          // the library's getCertificate omits identity, causing 403 rejections.
+          // the library's getCertificate omits identity on agent.call.
           (
             storageRef.current as unknown as {
               getCertificate: (h: string) => Promise<Uint8Array>;
             }
           ).getCertificate = async (hashString: string) => {
-            console.log("[useUploadFile][patch] getCertificate called");
             const result = await patchAgent.call(
               patchCanisterId,
               {
@@ -473,14 +505,14 @@ export function useUploadFile(identity: Identity | undefined): {
             const body = result.response.body;
             if (!isV3ResponseBody(body)) {
               throw new Error(
-                "[useUploadFile][patch] getCertificate: expected v3 response body with certificate",
+                "[useUploadFile] Expected v3 response body with upload certificate",
               );
             }
             return body.certificate;
           };
 
           console.log(
-            "[useUploadFile] StorageClient constructed + getCertificate patched",
+            "[useUploadFile] StorageClient ready (official object-storage protocol)",
           );
           cachedPrincipalRef.current = currentPrincipalText;
         } catch (e) {
@@ -512,13 +544,8 @@ export function useUploadFile(identity: Identity | undefined): {
       } catch (e) {
         console.error("[useUploadFile] putFile failed:", e);
         console.error(
-          "[useUploadFile] If error is '403 Forbidden: Invalid payload', check:",
-          [
-            "1. backendCanisterId above — must NOT be a __placeholder__",
-            "2. The IC certificate's certified_data must match the blob_tree root hash",
-            "3. The backend _immutableObjectStorageCreateCertificate must hex-decode hash → 32 bytes",
-            "4. Object-storage is only supported on LIVE deployments, not preview",
-          ],
+          "[useUploadFile] Upload failed. Common causes: wrong env.json canister id,",
+          "anonymous II session, preview deployment, storage budget exhausted, or network.",
         );
         // Reset so next attempt reinitialises cleanly.
         storageRef.current = null;

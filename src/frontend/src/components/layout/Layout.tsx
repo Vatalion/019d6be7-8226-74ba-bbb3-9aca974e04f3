@@ -1,6 +1,7 @@
 import { Link, Outlet, useLocation } from "@tanstack/react-router";
 import {
   ArrowLeftRight,
+  Heart,
   Coins,
   CreditCard,
   LayoutDashboard,
@@ -58,6 +59,12 @@ const AUTH_NAV_ITEMS: {
   ocid: string;
   icon: React.ElementType;
 }[] = [
+  {
+    to: "/favorites",
+    labelKey: "nav.favorites",
+    ocid: "nav-favorites",
+    icon: Heart,
+  },
   {
     to: "/jurors",
     labelKey: "nav.jurors",
@@ -447,6 +454,28 @@ export default function Layout() {
         {/* Footer — hidden on mobile (bottom nav takes that space) */}
         <footer className="hidden md:block bg-card border-t border-border px-4 py-3 text-center shrink-0">
           <p className="text-xs text-muted-foreground">
+            <Link
+              to="/"
+              hash="how-payments-work"
+              className="text-accent hover:underline mr-3"
+              data-ocid="footer-how-payments"
+            >
+              {t("paymentsGuide.learnMore")}
+            </Link>
+            <Link
+              to="/privacy"
+              className="text-accent hover:underline mr-3"
+              data-ocid="footer-privacy"
+            >
+              {t("footer.privacy")}
+            </Link>
+            <Link
+              to="/privacy"
+              className="text-accent hover:underline mr-3"
+              data-ocid="footer-privacy"
+            >
+              {t("footer.privacy")}
+            </Link>
             © {new Date().getFullYear()}. {t("footer.builtWith")}{" "}
             <a
               href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(

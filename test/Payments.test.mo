@@ -63,6 +63,29 @@ suite("Payments — formatTokenAmount using token metadata", func() {
   });
 });
 
+suite("Payments — explorer response parsing", func() {
+  test("parseTronGridResponse extracts recipient", func() {
+    let json = "{\"data\":[{\"to_address\":\"TXyz\",\"amount\":\"1000000\",\"blockNumber\":\"123\"}]}";
+    switch (Payments.parseTronGridResponse(json)) {
+      case (?p) {
+        expect.text(p.recipient).equal("TXyz");
+      };
+      case null assert false;
+    };
+  });
+
+  test("parseBscScanResponse accepts success status", func() {
+    let json = "{\"status\":\"1\",\"result\":{\"status\":\"1\",\"blockNumber\":\"456\"}}";
+    switch (Payments.parseBscScanResponse(json)) {
+      case (?p) {
+        expect.bool(p.success).equal(true);
+        expect.nat(p.blockNumber).equal(456);
+      };
+      case null assert false;
+    };
+  });
+});
+
 suite("Payments — validatePaymentAmount", func() {
   test("amount > 0 and >= min → #ok", func() {
     let result = Payments.validatePaymentAmount(100, 50);

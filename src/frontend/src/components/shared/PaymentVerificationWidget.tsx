@@ -134,14 +134,14 @@ export default function PaymentVerificationWidget({
   const { actor, isFetching } = useBackend();
   const qc = useQueryClient();
   const [txHash, setTxHash] = useState("");
-  const [submitted, setSubmitted] = useState(false);
+  const [, setSubmitted] = useState(false);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Poll verification status every 5s while pending
   const { data: verificationResult } = useQuery({
     queryKey: ["paymentVerification", tradeId.toString()],
     queryFn: () => actor!.getPaymentVerificationStatus(tradeId),
-    enabled: !!actor && !isFetching && submitted,
+    enabled: !!actor && !isFetching,
     refetchInterval: (query) => {
       const result = query.state.data;
       if (!result) return 5000;
@@ -158,6 +158,12 @@ export default function PaymentVerificationWidget({
       qc.invalidateQueries({ queryKey: ["trade", tradeId.toString()] });
     }
   }, [verificationResult?.status, qc, tradeId]);
+
+  useEffect(() => {
+    if (verificationResult != null) {
+      setSubmitted(true);
+    }
+  }, [verificationResult]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -213,6 +219,9 @@ export default function PaymentVerificationWidget({
           </h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             {t("verify.subtitle")}
+          </p>
+          <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+            {t("verify.explorerOptional")}
           </p>
         </div>
       </div>

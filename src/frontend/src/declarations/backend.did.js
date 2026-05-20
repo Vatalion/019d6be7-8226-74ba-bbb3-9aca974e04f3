@@ -8,6 +8,10 @@
 
 import { IDL } from '@icp-sdk/core/candid';
 
+export const CreateCertificateResult = IDL.Record({
+  'method' : IDL.Text,
+  'blob_hash' : IDL.Text,
+});
 export const UserId = IDL.Principal;
 export const DisputeId = IDL.Nat;
 export const MediaAttachment = IDL.Record({
@@ -28,6 +32,7 @@ export const Error = IDL.Variant({
   'unauthorized' : IDL.Null,
 });
 export const Result = IDL.Variant({ 'ok' : IDL.Null, 'err' : Error });
+export const ListingId = IDL.Nat;
 export const TradeToken = IDL.Variant({
   'USDT_ERC20' : IDL.Null,
   'USDT_AVAX' : IDL.Null,
@@ -55,7 +60,7 @@ export const PaymentMethod = IDL.Record({
   'address' : IDL.Text,
   'verification' : IDL.Opt(AddressVerification),
 });
-export const Result_25 = IDL.Variant({ 'ok' : PaymentMethod, 'err' : Error });
+export const Result_28 = IDL.Variant({ 'ok' : PaymentMethod, 'err' : Error });
 export const TradeId = IDL.Nat;
 export const EscrowAccount = IDL.Record({
   'fee' : IDL.Nat,
@@ -79,7 +84,6 @@ export const TradeStatus = IDL.Variant({
   'complete' : IDL.Null,
   'awaiting_approval' : IDL.Null,
 });
-export const ListingId = IDL.Nat;
 export const ShippingSelection = IDL.Record({
   'provider' : IDL.Text,
   'branchRef' : IDL.Opt(IDL.Text),
@@ -127,7 +131,7 @@ export const JurorVoteChoice = IDL.Variant({
   'sellerWins' : IDL.Null,
   'buyerWins' : IDL.Null,
 });
-export const Result_8 = IDL.Variant({ 'ok' : IDL.Bool, 'err' : Error });
+export const Result_10 = IDL.Variant({ 'ok' : IDL.Bool, 'err' : Error });
 export const ProposalId = IDL.Nat;
 export const ProposalStatus = IDL.Variant({
   'active' : IDL.Null,
@@ -136,7 +140,7 @@ export const ProposalStatus = IDL.Variant({
   'executed' : IDL.Null,
   'passed' : IDL.Null,
 });
-export const Result_24 = IDL.Variant({ 'ok' : ProposalStatus, 'err' : Error });
+export const Result_27 = IDL.Variant({ 'ok' : ProposalStatus, 'err' : Error });
 export const ListingCategory = IDL.Variant({
   'clothing' : IDL.Null,
   'other' : IDL.Null,
@@ -145,6 +149,7 @@ export const ListingCategory = IDL.Variant({
   'services' : IDL.Null,
   'electronics' : IDL.Null,
 });
+export const CategoryId = IDL.Nat;
 export const ItemCondition = IDL.Variant({
   'new' : IDL.Null,
   'fair' : IDL.Null,
@@ -195,13 +200,16 @@ export const TrustLevel = IDL.Variant({
 });
 export const ListingCard = IDL.Record({
   'id' : ListingId,
+  'categoryId' : CategoryId,
   'title' : IDL.Text,
   'sellerPrincipal' : UserId,
   'priceAmount' : IDL.Nat,
+  'categorySlug' : IDL.Text,
   'shippingMethods' : IDL.Vec(ShippingMethod),
   'createdAt' : Timestamp,
   'description' : IDL.Text,
   'sellerTrustLevel' : TrustLevel,
+  'isPromoted' : IDL.Bool,
   'sellerRating' : IDL.Int,
   'priceToken' : TradeToken,
   'category' : ListingCategory,
@@ -211,8 +219,8 @@ export const ListingCard = IDL.Record({
   'digitalFileUrl' : IDL.Text,
   'condition' : ItemCondition,
 });
-export const Result_23 = IDL.Variant({ 'ok' : ListingCard, 'err' : Error });
-export const Result_7 = IDL.Variant({ 'ok' : IDL.Text, 'err' : Error });
+export const Result_26 = IDL.Variant({ 'ok' : ListingCard, 'err' : Error });
+export const Result_9 = IDL.Variant({ 'ok' : IDL.Text, 'err' : Error });
 export const ProposalType = IDL.Variant({
   'TextResolution' : IDL.Record({ 'description' : IDL.Text }),
   'TreasuryTransfer' : IDL.Record({
@@ -221,7 +229,8 @@ export const ProposalType = IDL.Variant({
   }),
   'ParameterChange' : IDL.Record({ 'key' : IDL.Text, 'value' : IDL.Text }),
 });
-export const Result_22 = IDL.Variant({ 'ok' : ProposalId, 'err' : Error });
+export const Result_25 = IDL.Variant({ 'ok' : ProposalId, 'err' : Error });
+export const SavedSearchId = IDL.Nat;
 export const UserRole = IDL.Variant({
   'admin' : IDL.Null,
   'moderator' : IDL.Null,
@@ -303,7 +312,7 @@ export const PlatformMetrics__1 = IDL.Record({
   'disputeRate' : IDL.Float64,
   'swapSuccessRate' : IDL.Float64,
 });
-export const Result_21 = IDL.Variant({ 'ok' : DigitalDelivery, 'err' : Error });
+export const Result_24 = IDL.Variant({ 'ok' : DigitalDelivery, 'err' : Error });
 export const DisputeStatus = IDL.Variant({
   'resolved' : IDL.Null,
   'opened' : IDL.Null,
@@ -409,7 +418,7 @@ export const JurorStats = IDL.Record({
   'registeredAt' : Timestamp,
   'resolvedCount' : IDL.Nat,
 });
-export const Result_20 = IDL.Variant({
+export const Result_23 = IDL.Variant({
   'ok' : IDL.Vec(JurorStats),
   'err' : Error,
 });
@@ -421,8 +430,21 @@ export const LinkPreview = IDL.Record({
   'siteName' : IDL.Opt(IDL.Text),
   'imageUrl' : IDL.Opt(IDL.Text),
 });
-export const Result_19 = IDL.Variant({ 'ok' : LinkPreview, 'err' : Error });
-export const Result_18 = IDL.Variant({
+export const Result_22 = IDL.Variant({ 'ok' : LinkPreview, 'err' : Error });
+export const ListingInquiryMessageId = IDL.Nat;
+export const ListingInquiryId = IDL.Nat;
+export const ListingInquiryMessage = IDL.Record({
+  'id' : ListingInquiryMessageId,
+  'content' : IDL.Text,
+  'createdAt' : Timestamp,
+  'sender' : UserId,
+  'inquiryId' : ListingInquiryId,
+});
+export const Result_21 = IDL.Variant({
+  'ok' : IDL.Vec(ListingInquiryMessage),
+  'err' : Error,
+});
+export const Result_20 = IDL.Variant({
   'ok' : IDL.Vec(
     IDL.Record({
       'id' : IDL.Text,
@@ -463,7 +485,7 @@ export const ModuleMetricsView = IDL.Record({
   'errorCount' : IDL.Nat,
   'requestCount' : IDL.Nat,
 });
-export const Result_17 = IDL.Variant({
+export const Result_19 = IDL.Variant({
   'ok' : IDL.Vec(JurorDashboardEntry),
   'err' : Error,
 });
@@ -486,11 +508,11 @@ export const NovaPoshtaBranch = IDL.Record({
   'address' : IDL.Text,
   'schedule' : IDL.Opt(IDL.Text),
 });
-export const Result_16 = IDL.Variant({
+export const Result_18 = IDL.Variant({
   'ok' : IDL.Vec(NovaPoshtaBranch),
   'err' : Error,
 });
-export const Result_15 = IDL.Variant({
+export const Result_17 = IDL.Variant({
   'ok' : IDL.Vec(DisputeView),
   'err' : Error,
 });
@@ -515,7 +537,14 @@ export const PlatformMetrics = IDL.Record({
   'tradesByToken' : IDL.Vec(IDL.Tuple(TradeToken, IDL.Nat)),
   'disputeRatePct' : IDL.Nat,
 });
-export const Result_14 = IDL.Variant({ 'ok' : IDL.Int, 'err' : Error });
+export const SavedSearch = IDL.Record({
+  'id' : SavedSearchId,
+  'owner' : UserId,
+  'paramsJson' : IDL.Text,
+  'name' : IDL.Text,
+  'createdAt' : Timestamp,
+});
+export const Result_16 = IDL.Variant({ 'ok' : IDL.Int, 'err' : Error });
 export const ShippingOption = IDL.Record({
   'cost' : IDL.Float64,
   'deliveryDays' : IDL.Nat,
@@ -562,13 +591,13 @@ export const WithdrawalRecord = IDL.Record({
   'amount' : IDL.Nat,
   'proposalId' : IDL.Nat,
 });
-export const Result_13 = IDL.Variant({
+export const Result_15 = IDL.Variant({
   'ok' : IDL.Vec(
     IDL.Record({ 'name' : IDL.Text, 'address' : IDL.Text, 'index' : IDL.Text })
   ),
   'err' : Error,
 });
-export const Result_12 = IDL.Variant({
+export const Result_14 = IDL.Variant({
   'ok' : IDL.Record({
     'status' : IDL.Text,
     'trackingNumber' : IDL.Text,
@@ -610,9 +639,22 @@ export const BalanceView = IDL.Record({
   'usdcBalance' : IDL.Nat,
   'lastChecked' : IDL.Int,
 });
-export const Result_11 = IDL.Variant({ 'ok' : TradeId, 'err' : Error });
-export const Result_10 = IDL.Variant({ 'ok' : FeedbackId, 'err' : Error });
-export const Result_9 = IDL.Variant({ 'ok' : DisputeId, 'err' : Error });
+export const Result_13 = IDL.Variant({ 'ok' : TradeId, 'err' : Error });
+export const Result_12 = IDL.Variant({ 'ok' : FeedbackId, 'err' : Error });
+export const CategoryNode = IDL.Record({
+  'id' : CategoryId,
+  'labelEn' : IDL.Text,
+  'labelUk' : IDL.Text,
+  'slug' : IDL.Text,
+  'legacyCategory' : ListingCategory,
+  'parentId' : IDL.Opt(CategoryId),
+});
+export const Result_11 = IDL.Variant({ 'ok' : DisputeId, 'err' : Error });
+export const Result_8 = IDL.Variant({ 'ok' : SavedSearch, 'err' : Error });
+export const Result_7 = IDL.Variant({
+  'ok' : ListingInquiryMessage,
+  'err' : Error,
+});
 export const Result_6 = IDL.Variant({ 'ok' : Message, 'err' : Error });
 export const Result_5 = IDL.Variant({ 'ok' : UserProfile, 'err' : Error });
 export const HttpHeader = IDL.Record({ 'value' : IDL.Text, 'name' : IDL.Text });
@@ -650,7 +692,12 @@ export const idlService = IDL.Service({
       [],
       [],
     ),
-  '_immutableObjectStorageCreateCertificate' : IDL.Func([IDL.Text], [], []),
+  '_immutableObjectStorageCreateCertificate' : IDL.Func(
+      [IDL.Text],
+      [CreateCertificateResult],
+      [],
+    ),
+  '_immutableObjectStorageUpdateGatewayPrincipals' : IDL.Func([], [], []),
   '_transformResponse' : IDL.Func(
       [
         IDL.Record({
@@ -677,17 +724,20 @@ export const idlService = IDL.Service({
     ),
   'addComplianceNote' : IDL.Func([UserId, IDL.Text], [], []),
   'addEvidence' : IDL.Func([DisputeId, IDL.Vec(MediaAttachment)], [Result], []),
+  'addFavorite' : IDL.Func([ListingId], [Result], []),
   'addModeratorNote' : IDL.Func([DisputeId, IDL.Text], [Result], []),
   'addPaymentMethod' : IDL.Func(
       [TradeToken, IDL.Text, IDL.Bool],
-      [Result_25],
+      [Result_28],
       [],
     ),
   'adminGetAllTrades' : IDL.Func([], [IDL.Vec(TradeView)], ['query']),
+  'adminPromoteListing' : IDL.Func([ListingId], [Result], []),
   'adminRemoveListing' : IDL.Func([ListingId, IDL.Text], [Result], []),
   'appealDispute' : IDL.Func([DisputeId, IDL.Text], [Result], []),
   'assignJurors' : IDL.Func([DisputeId], [Result], []),
   'banUser' : IDL.Func([UserId, IDL.Text], [], []),
+  'bumpListing' : IDL.Func([ListingId], [Result], []),
   'calculateShippingCost' : IDL.Func(
       [IDL.Text, IDL.Text, IDL.Float64, ShippingServiceType],
       [
@@ -705,7 +755,7 @@ export const idlService = IDL.Service({
       [],
     ),
   'checkAndExpireTimeouts' : IDL.Func([], [IDL.Nat], []),
-  'checkDigitalInspectionDeadline' : IDL.Func([TradeId], [Result_8], []),
+  'checkDigitalInspectionDeadline' : IDL.Func([TradeId], [Result_10], []),
   'checkJuryDeadlines' : IDL.Func([], [IDL.Nat], []),
   'cleanupResolvedListings' : IDL.Func(
       [],
@@ -718,7 +768,7 @@ export const idlService = IDL.Service({
       ],
       [],
     ),
-  'closeProposal' : IDL.Func([ProposalId], [Result_24], []),
+  'closeProposal' : IDL.Func([ProposalId], [Result_27], []),
   'confirmPaymentReceived' : IDL.Func([TradeId], [Result], []),
   'confirmPaymentSent' : IDL.Func([TradeId], [Result], []),
   'createListing' : IDL.Func(
@@ -726,6 +776,7 @@ export const idlService = IDL.Service({
         IDL.Text,
         IDL.Text,
         ListingCategory,
+        IDL.Opt(CategoryId),
         IDL.Nat,
         TradeToken,
         ItemCondition,
@@ -741,34 +792,30 @@ export const idlService = IDL.Service({
         IDL.Opt(UkrposhtaConfig),
         IDL.Opt(MeestConfig),
       ],
-      [Result_23],
+      [Result_26],
       [],
     ),
-  'createMeestTTN' : IDL.Func([TradeId], [Result_7], []),
+  'createMeestTTN' : IDL.Func([TradeId], [Result_9], []),
   'createMeestWaybill' : IDL.Func(
       [IDL.Text, IDL.Text, IDL.Float64, IDL.Text, IDL.Nat],
       [IDL.Variant({ 'ok' : IDL.Text, 'err' : IDL.Text })],
       [],
     ),
-  'createNovaPoshtaTTN' : IDL.Func([TradeId], [Result_7], []),
-  'createProposal' : IDL.Func([ProposalType, IDL.Text], [Result_22], []),
+  'createNovaPoshtaTTN' : IDL.Func([TradeId], [Result_9], []),
+  'createProposal' : IDL.Func([ProposalType, IDL.Text], [Result_25], []),
   'createUkrPoshtaWaybill' : IDL.Func(
       [IDL.Text, IDL.Text, IDL.Float64, IDL.Text, IDL.Nat],
       [IDL.Variant({ 'ok' : IDL.Text, 'err' : IDL.Text })],
       [],
     ),
-  'createUkrposhtaTTN' : IDL.Func([TradeId], [Result_7], []),
+  'createUkrposhtaTTN' : IDL.Func([TradeId], [Result_9], []),
   'createWaybill' : IDL.Func(
       [IDL.Text, IDL.Text, IDL.Float64, IDL.Text, IDL.Nat, ShippingServiceType],
       [IDL.Variant({ 'ok' : IDL.Text, 'err' : IDL.Text })],
       [],
     ),
   'deactivateListing' : IDL.Func([ListingId], [Result], []),
-  'debugGetCertifiedData' : IDL.Func(
-      [],
-      [IDL.Opt(IDL.Vec(IDL.Nat8))],
-      ['query'],
-    ),
+  'deleteSavedSearch' : IDL.Func([SavedSearchId], [Result], []),
   'demoteFromModerator' : IDL.Func([UserId], [], []),
   'estimateTokenAmount' : IDL.Func(
       [IDL.Nat, TradeToken],
@@ -794,7 +841,7 @@ export const idlService = IDL.Service({
     ),
   'getCyclesStatus' : IDL.Func([], [CyclesStatus], ['query']),
   'getDashboardMetrics' : IDL.Func([], [PlatformMetrics__1], ['query']),
-  'getDigitalDelivery' : IDL.Func([TradeId], [Result_21], []),
+  'getDigitalDelivery' : IDL.Func([TradeId], [Result_24], []),
   'getDispute' : IDL.Func([DisputeId], [IDL.Opt(DisputeView)], ['query']),
   'getDisputeJurors' : IDL.Func([DisputeId], [IDL.Opt(JuryView)], ['query']),
   'getDisputesByTrade' : IDL.Func([TradeId], [IDL.Vec(DisputeView)], ['query']),
@@ -814,11 +861,28 @@ export const idlService = IDL.Service({
       [IDL.Vec(ListingCard)],
       ['query'],
     ),
+  'getExplorerApiKeyStatus' : IDL.Func(
+      [],
+      [
+        IDL.Record({
+          'bscScanConfigured' : IDL.Bool,
+          'infuraConfigured' : IDL.Bool,
+          'tronGridConfigured' : IDL.Bool,
+        }),
+      ],
+      ['query'],
+    ),
+  'getFavoriteListings' : IDL.Func([], [IDL.Vec(ListingCard)], ['query']),
   'getFeedbackForTrade' : IDL.Func([TradeId], [IDL.Vec(Feedback)], ['query']),
   'getJurorDashboard' : IDL.Func([], [IDL.Vec(JurorDashboardEntry)], ['query']),
-  'getJuryPool' : IDL.Func([], [Result_20], ['query']),
-  'getLinkPreview' : IDL.Func([IDL.Text], [Result_19], []),
+  'getJuryPool' : IDL.Func([], [Result_23], ['query']),
+  'getLinkPreview' : IDL.Func([IDL.Text], [Result_22], []),
   'getListing' : IDL.Func([ListingId], [IDL.Opt(ListingCard)], ['query']),
+  'getListingInquiryMessages' : IDL.Func(
+      [ListingId, UserId],
+      [Result_21],
+      ['query'],
+    ),
   'getListingsByUser' : IDL.Func(
       [UserId, IDL.Nat, IDL.Nat],
       [IDL.Vec(ListingCard)],
@@ -826,7 +890,7 @@ export const idlService = IDL.Service({
     ),
   'getMeestPUDOs' : IDL.Func(
       [IDL.Text, IDL.Opt(IDL.Text), IDL.Opt(IDL.Nat)],
-      [Result_18],
+      [Result_20],
       [],
     ),
   'getMetricsSummary' : IDL.Func([], [MetricsSummary], ['query']),
@@ -834,7 +898,7 @@ export const idlService = IDL.Service({
   'getModuleMetrics' : IDL.Func([], [IDL.Vec(ModuleMetricsView)], ['query']),
   'getMyDisputes' : IDL.Func([], [IDL.Vec(DisputeView)], ['query']),
   'getMyFeedback' : IDL.Func([], [IDL.Vec(Feedback)], ['query']),
-  'getMyJurorDashboard' : IDL.Func([], [Result_17], ['query']),
+  'getMyJurorDashboard' : IDL.Func([], [Result_19], ['query']),
   'getMyListings' : IDL.Func(
       [IDL.Nat, IDL.Nat],
       [IDL.Vec(ListingCard)],
@@ -860,11 +924,11 @@ export const idlService = IDL.Service({
     ),
   'getNovaPoshtaBranches' : IDL.Func(
       [IDL.Text, IDL.Opt(IDL.Text), IDL.Opt(IDL.Nat)],
-      [Result_16],
+      [Result_18],
       [],
     ),
-  'getNovaPoshtaCityRef' : IDL.Func([IDL.Text], [Result_7], []),
-  'getOpenDisputeQueue' : IDL.Func([IDL.Nat, IDL.Nat], [Result_15], ['query']),
+  'getNovaPoshtaCityRef' : IDL.Func([IDL.Text], [Result_9], []),
+  'getOpenDisputeQueue' : IDL.Func([IDL.Nat, IDL.Nat], [Result_17], ['query']),
   'getP95Latency' : IDL.Func([IDL.Text, IDL.Nat], [IDL.Nat], ['query']),
   'getPaymentMethods' : IDL.Func([], [IDL.Vec(PaymentMethod)], ['query']),
   'getPaymentVerificationStatus' : IDL.Func(
@@ -880,7 +944,8 @@ export const idlService = IDL.Service({
       ['query'],
     ),
   'getRequestRate' : IDL.Func([IDL.Text, IDL.Nat], [IDL.Nat], ['query']),
-  'getSellerLiability' : IDL.Func([IDL.Principal], [Result_14], ['query']),
+  'getSavedSearches' : IDL.Func([], [IDL.Vec(SavedSearch)], ['query']),
+  'getSellerLiability' : IDL.Func([IDL.Principal], [Result_16], ['query']),
   'getShippingOptions' : IDL.Func(
       [IDL.Float64, IDL.Text, IDL.Text],
       [IDL.Variant({ 'ok' : IDL.Vec(ShippingOption), 'err' : IDL.Text })],
@@ -933,10 +998,10 @@ export const idlService = IDL.Service({
     ),
   'getUkrposhtaOffices' : IDL.Func(
       [IDL.Text, IDL.Opt(IDL.Text), IDL.Opt(IDL.Nat)],
-      [Result_13],
+      [Result_15],
       [],
     ),
-  'getUnifiedTrackingInfo' : IDL.Func([TradeId], [Result_12], []),
+  'getUnifiedTrackingInfo' : IDL.Func([TradeId], [Result_14], []),
   'getUnreadCount' : IDL.Func(
       [],
       [IDL.Vec(IDL.Tuple(TradeId, IDL.Nat))],
@@ -958,34 +1023,38 @@ export const idlService = IDL.Service({
   'incrementListingView' : IDL.Func([ListingId], [], []),
   'initiateOnChainTrade' : IDL.Func(
       [ListingId, TradeToken, IDL.Opt(ShippingSelection)],
-      [Result_11],
+      [Result_13],
       [],
     ),
   'initiateTrade' : IDL.Func(
       [ListingId, TradeToken, IDL.Opt(ShippingSelection)],
-      [Result_11],
+      [Result_13],
       [],
     ),
+  'isListingFavorite' : IDL.Func([ListingId], [IDL.Bool], ['query']),
   'leaveFeedback' : IDL.Func(
       [TradeId, UserId, IDL.Nat, IDL.Text],
-      [Result_10],
+      [Result_12],
       [],
     ),
+  'listCategories' : IDL.Func([], [IDL.Vec(CategoryNode)], ['query']),
   'markAllNotificationsRead' : IDL.Func([], [Result], []),
   'markNotificationRead' : IDL.Func([IDL.Nat], [Result], []),
   'markTradeAsRead' : IDL.Func([TradeId], [], []),
-  'openDigitalDispute' : IDL.Func([TradeId, IDL.Text], [Result_9], []),
-  'openDispute' : IDL.Func([TradeId, DisputeReason, IDL.Text], [Result_9], []),
+  'openDigitalDispute' : IDL.Func([TradeId, IDL.Text], [Result_11], []),
+  'openDispute' : IDL.Func([TradeId, DisputeReason, IDL.Text], [Result_11], []),
   'promoteToModerator' : IDL.Func([UserId], [], []),
-  'proposeCancelTrade' : IDL.Func([TradeId], [Result_8], []),
+  'proposeCancelTrade' : IDL.Func([TradeId], [Result_10], []),
   'reactivateListing' : IDL.Func([ListingId], [Result], []),
   'recordRequest' : IDL.Func([IDL.Text, IDL.Nat, IDL.Nat], [], ['oneway']),
   'recordTreasuryFee' : IDL.Func([TradeId, IDL.Nat, TradeToken], [], []),
   'refreshRates' : IDL.Func([], [IDL.Nat], []),
   'refreshVaultBalance' : IDL.Func([ChainType], [BalanceView], []),
   'registerAsJuror' : IDL.Func([IDL.Float64], [Result], []),
+  'removeFavorite' : IDL.Func([ListingId], [Result], []),
   'removeListingByAdmin' : IDL.Func([ListingId, IDL.Text], [], []),
   'reopenDispute' : IDL.Func([DisputeId], [Result], []),
+  'reportListing' : IDL.Func([ListingId, IDL.Text], [Result], []),
   'requestRefund' : IDL.Func([TradeId], [Result], []),
   'resolveDispute' : IDL.Func(
       [DisputeId, ResolutionOutcome, IDL.Text],
@@ -997,13 +1066,15 @@ export const idlService = IDL.Service({
       [Result],
       [],
     ),
-  'retryMeestTTNCreation' : IDL.Func([TradeId], [Result_7], []),
-  'retryTTNCreation' : IDL.Func([TradeId], [Result_7], []),
-  'retryUkrposhtaTTNCreation' : IDL.Func([TradeId], [Result_7], []),
+  'retryMeestTTNCreation' : IDL.Func([TradeId], [Result_9], []),
+  'retryTTNCreation' : IDL.Func([TradeId], [Result_9], []),
+  'retryUkrposhtaTTNCreation' : IDL.Func([TradeId], [Result_9], []),
+  'saveSearch' : IDL.Func([IDL.Text, IDL.Text], [Result_8], []),
   'searchListings' : IDL.Func(
       [
         IDL.Opt(IDL.Text),
         IDL.Opt(ListingCategory),
+        IDL.Opt(CategoryId),
         IDL.Opt(IDL.Nat),
         IDL.Opt(IDL.Nat),
         IDL.Opt(IDL.Text),
@@ -1011,9 +1082,16 @@ export const idlService = IDL.Service({
         IDL.Opt(ShippingCarrier),
         IDL.Nat,
         IDL.Nat,
+        IDL.Opt(TradeToken),
       ],
       [IDL.Vec(ListingCard)],
       ['query'],
+    ),
+  'sendListingInquiry' : IDL.Func([ListingId, IDL.Text], [Result_7], []),
+  'sendListingInquiryReply' : IDL.Func(
+      [ListingId, UserId, IDL.Text],
+      [Result_7],
+      [],
     ),
   'sendMessage' : IDL.Func(
       [TradeId, IDL.Text, IDL.Vec(MediaAttachment)],
@@ -1074,6 +1152,7 @@ export const idlService = IDL.Service({
         IDL.Text,
         IDL.Text,
         ListingCategory,
+        IDL.Opt(CategoryId),
         IDL.Nat,
         TradeToken,
         ItemCondition,
@@ -1111,6 +1190,10 @@ export const idlService = IDL.Service({
 export const idlInitArgs = [];
 
 export const idlFactory = ({ IDL }) => {
+  const CreateCertificateResult = IDL.Record({
+    'method' : IDL.Text,
+    'blob_hash' : IDL.Text,
+  });
   const UserId = IDL.Principal;
   const DisputeId = IDL.Nat;
   const MediaAttachment = IDL.Record({
@@ -1131,6 +1214,7 @@ export const idlFactory = ({ IDL }) => {
     'unauthorized' : IDL.Null,
   });
   const Result = IDL.Variant({ 'ok' : IDL.Null, 'err' : Error });
+  const ListingId = IDL.Nat;
   const TradeToken = IDL.Variant({
     'USDT_ERC20' : IDL.Null,
     'USDT_AVAX' : IDL.Null,
@@ -1158,7 +1242,7 @@ export const idlFactory = ({ IDL }) => {
     'address' : IDL.Text,
     'verification' : IDL.Opt(AddressVerification),
   });
-  const Result_25 = IDL.Variant({ 'ok' : PaymentMethod, 'err' : Error });
+  const Result_28 = IDL.Variant({ 'ok' : PaymentMethod, 'err' : Error });
   const TradeId = IDL.Nat;
   const EscrowAccount = IDL.Record({
     'fee' : IDL.Nat,
@@ -1182,7 +1266,6 @@ export const idlFactory = ({ IDL }) => {
     'complete' : IDL.Null,
     'awaiting_approval' : IDL.Null,
   });
-  const ListingId = IDL.Nat;
   const ShippingSelection = IDL.Record({
     'provider' : IDL.Text,
     'branchRef' : IDL.Opt(IDL.Text),
@@ -1230,7 +1313,7 @@ export const idlFactory = ({ IDL }) => {
     'sellerWins' : IDL.Null,
     'buyerWins' : IDL.Null,
   });
-  const Result_8 = IDL.Variant({ 'ok' : IDL.Bool, 'err' : Error });
+  const Result_10 = IDL.Variant({ 'ok' : IDL.Bool, 'err' : Error });
   const ProposalId = IDL.Nat;
   const ProposalStatus = IDL.Variant({
     'active' : IDL.Null,
@@ -1239,7 +1322,7 @@ export const idlFactory = ({ IDL }) => {
     'executed' : IDL.Null,
     'passed' : IDL.Null,
   });
-  const Result_24 = IDL.Variant({ 'ok' : ProposalStatus, 'err' : Error });
+  const Result_27 = IDL.Variant({ 'ok' : ProposalStatus, 'err' : Error });
   const ListingCategory = IDL.Variant({
     'clothing' : IDL.Null,
     'other' : IDL.Null,
@@ -1248,6 +1331,7 @@ export const idlFactory = ({ IDL }) => {
     'services' : IDL.Null,
     'electronics' : IDL.Null,
   });
+  const CategoryId = IDL.Nat;
   const ItemCondition = IDL.Variant({
     'new' : IDL.Null,
     'fair' : IDL.Null,
@@ -1298,13 +1382,16 @@ export const idlFactory = ({ IDL }) => {
   });
   const ListingCard = IDL.Record({
     'id' : ListingId,
+    'categoryId' : CategoryId,
     'title' : IDL.Text,
     'sellerPrincipal' : UserId,
     'priceAmount' : IDL.Nat,
+    'categorySlug' : IDL.Text,
     'shippingMethods' : IDL.Vec(ShippingMethod),
     'createdAt' : Timestamp,
     'description' : IDL.Text,
     'sellerTrustLevel' : TrustLevel,
+    'isPromoted' : IDL.Bool,
     'sellerRating' : IDL.Int,
     'priceToken' : TradeToken,
     'category' : ListingCategory,
@@ -1314,8 +1401,8 @@ export const idlFactory = ({ IDL }) => {
     'digitalFileUrl' : IDL.Text,
     'condition' : ItemCondition,
   });
-  const Result_23 = IDL.Variant({ 'ok' : ListingCard, 'err' : Error });
-  const Result_7 = IDL.Variant({ 'ok' : IDL.Text, 'err' : Error });
+  const Result_26 = IDL.Variant({ 'ok' : ListingCard, 'err' : Error });
+  const Result_9 = IDL.Variant({ 'ok' : IDL.Text, 'err' : Error });
   const ProposalType = IDL.Variant({
     'TextResolution' : IDL.Record({ 'description' : IDL.Text }),
     'TreasuryTransfer' : IDL.Record({
@@ -1324,7 +1411,8 @@ export const idlFactory = ({ IDL }) => {
     }),
     'ParameterChange' : IDL.Record({ 'key' : IDL.Text, 'value' : IDL.Text }),
   });
-  const Result_22 = IDL.Variant({ 'ok' : ProposalId, 'err' : Error });
+  const Result_25 = IDL.Variant({ 'ok' : ProposalId, 'err' : Error });
+  const SavedSearchId = IDL.Nat;
   const UserRole = IDL.Variant({
     'admin' : IDL.Null,
     'moderator' : IDL.Null,
@@ -1406,7 +1494,7 @@ export const idlFactory = ({ IDL }) => {
     'disputeRate' : IDL.Float64,
     'swapSuccessRate' : IDL.Float64,
   });
-  const Result_21 = IDL.Variant({ 'ok' : DigitalDelivery, 'err' : Error });
+  const Result_24 = IDL.Variant({ 'ok' : DigitalDelivery, 'err' : Error });
   const DisputeStatus = IDL.Variant({
     'resolved' : IDL.Null,
     'opened' : IDL.Null,
@@ -1512,7 +1600,7 @@ export const idlFactory = ({ IDL }) => {
     'registeredAt' : Timestamp,
     'resolvedCount' : IDL.Nat,
   });
-  const Result_20 = IDL.Variant({ 'ok' : IDL.Vec(JurorStats), 'err' : Error });
+  const Result_23 = IDL.Variant({ 'ok' : IDL.Vec(JurorStats), 'err' : Error });
   const LinkPreview = IDL.Record({
     'url' : IDL.Text,
     'title' : IDL.Opt(IDL.Text),
@@ -1521,8 +1609,21 @@ export const idlFactory = ({ IDL }) => {
     'siteName' : IDL.Opt(IDL.Text),
     'imageUrl' : IDL.Opt(IDL.Text),
   });
-  const Result_19 = IDL.Variant({ 'ok' : LinkPreview, 'err' : Error });
-  const Result_18 = IDL.Variant({
+  const Result_22 = IDL.Variant({ 'ok' : LinkPreview, 'err' : Error });
+  const ListingInquiryMessageId = IDL.Nat;
+  const ListingInquiryId = IDL.Nat;
+  const ListingInquiryMessage = IDL.Record({
+    'id' : ListingInquiryMessageId,
+    'content' : IDL.Text,
+    'createdAt' : Timestamp,
+    'sender' : UserId,
+    'inquiryId' : ListingInquiryId,
+  });
+  const Result_21 = IDL.Variant({
+    'ok' : IDL.Vec(ListingInquiryMessage),
+    'err' : Error,
+  });
+  const Result_20 = IDL.Variant({
     'ok' : IDL.Vec(
       IDL.Record({
         'id' : IDL.Text,
@@ -1563,7 +1664,7 @@ export const idlFactory = ({ IDL }) => {
     'errorCount' : IDL.Nat,
     'requestCount' : IDL.Nat,
   });
-  const Result_17 = IDL.Variant({
+  const Result_19 = IDL.Variant({
     'ok' : IDL.Vec(JurorDashboardEntry),
     'err' : Error,
   });
@@ -1586,11 +1687,11 @@ export const idlFactory = ({ IDL }) => {
     'address' : IDL.Text,
     'schedule' : IDL.Opt(IDL.Text),
   });
-  const Result_16 = IDL.Variant({
+  const Result_18 = IDL.Variant({
     'ok' : IDL.Vec(NovaPoshtaBranch),
     'err' : Error,
   });
-  const Result_15 = IDL.Variant({ 'ok' : IDL.Vec(DisputeView), 'err' : Error });
+  const Result_17 = IDL.Variant({ 'ok' : IDL.Vec(DisputeView), 'err' : Error });
   const PaymentVerificationStatus = IDL.Variant({
     'verified' : IDL.Null,
     'pending' : IDL.Null,
@@ -1612,7 +1713,14 @@ export const idlFactory = ({ IDL }) => {
     'tradesByToken' : IDL.Vec(IDL.Tuple(TradeToken, IDL.Nat)),
     'disputeRatePct' : IDL.Nat,
   });
-  const Result_14 = IDL.Variant({ 'ok' : IDL.Int, 'err' : Error });
+  const SavedSearch = IDL.Record({
+    'id' : SavedSearchId,
+    'owner' : UserId,
+    'paramsJson' : IDL.Text,
+    'name' : IDL.Text,
+    'createdAt' : Timestamp,
+  });
+  const Result_16 = IDL.Variant({ 'ok' : IDL.Int, 'err' : Error });
   const ShippingOption = IDL.Record({
     'cost' : IDL.Float64,
     'deliveryDays' : IDL.Nat,
@@ -1659,7 +1767,7 @@ export const idlFactory = ({ IDL }) => {
     'amount' : IDL.Nat,
     'proposalId' : IDL.Nat,
   });
-  const Result_13 = IDL.Variant({
+  const Result_15 = IDL.Variant({
     'ok' : IDL.Vec(
       IDL.Record({
         'name' : IDL.Text,
@@ -1669,7 +1777,7 @@ export const idlFactory = ({ IDL }) => {
     ),
     'err' : Error,
   });
-  const Result_12 = IDL.Variant({
+  const Result_14 = IDL.Variant({
     'ok' : IDL.Record({
       'status' : IDL.Text,
       'trackingNumber' : IDL.Text,
@@ -1711,9 +1819,19 @@ export const idlFactory = ({ IDL }) => {
     'usdcBalance' : IDL.Nat,
     'lastChecked' : IDL.Int,
   });
-  const Result_11 = IDL.Variant({ 'ok' : TradeId, 'err' : Error });
-  const Result_10 = IDL.Variant({ 'ok' : FeedbackId, 'err' : Error });
-  const Result_9 = IDL.Variant({ 'ok' : DisputeId, 'err' : Error });
+  const Result_13 = IDL.Variant({ 'ok' : TradeId, 'err' : Error });
+  const Result_12 = IDL.Variant({ 'ok' : FeedbackId, 'err' : Error });
+  const CategoryNode = IDL.Record({
+    'id' : CategoryId,
+    'labelEn' : IDL.Text,
+    'labelUk' : IDL.Text,
+    'slug' : IDL.Text,
+    'legacyCategory' : ListingCategory,
+    'parentId' : IDL.Opt(CategoryId),
+  });
+  const Result_11 = IDL.Variant({ 'ok' : DisputeId, 'err' : Error });
+  const Result_8 = IDL.Variant({ 'ok' : SavedSearch, 'err' : Error });
+  const Result_7 = IDL.Variant({ 'ok' : ListingInquiryMessage, 'err' : Error });
   const Result_6 = IDL.Variant({ 'ok' : Message, 'err' : Error });
   const Result_5 = IDL.Variant({ 'ok' : UserProfile, 'err' : Error });
   const HttpHeader = IDL.Record({ 'value' : IDL.Text, 'name' : IDL.Text });
@@ -1751,7 +1869,12 @@ export const idlFactory = ({ IDL }) => {
         [],
         [],
       ),
-    '_immutableObjectStorageCreateCertificate' : IDL.Func([IDL.Text], [], []),
+    '_immutableObjectStorageCreateCertificate' : IDL.Func(
+        [IDL.Text],
+        [CreateCertificateResult],
+        [],
+      ),
+    '_immutableObjectStorageUpdateGatewayPrincipals' : IDL.Func([], [], []),
     '_transformResponse' : IDL.Func(
         [
           IDL.Record({
@@ -1782,17 +1905,20 @@ export const idlFactory = ({ IDL }) => {
         [Result],
         [],
       ),
+    'addFavorite' : IDL.Func([ListingId], [Result], []),
     'addModeratorNote' : IDL.Func([DisputeId, IDL.Text], [Result], []),
     'addPaymentMethod' : IDL.Func(
         [TradeToken, IDL.Text, IDL.Bool],
-        [Result_25],
+        [Result_28],
         [],
       ),
     'adminGetAllTrades' : IDL.Func([], [IDL.Vec(TradeView)], ['query']),
+    'adminPromoteListing' : IDL.Func([ListingId], [Result], []),
     'adminRemoveListing' : IDL.Func([ListingId, IDL.Text], [Result], []),
     'appealDispute' : IDL.Func([DisputeId, IDL.Text], [Result], []),
     'assignJurors' : IDL.Func([DisputeId], [Result], []),
     'banUser' : IDL.Func([UserId, IDL.Text], [], []),
+    'bumpListing' : IDL.Func([ListingId], [Result], []),
     'calculateShippingCost' : IDL.Func(
         [IDL.Text, IDL.Text, IDL.Float64, ShippingServiceType],
         [
@@ -1810,7 +1936,7 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'checkAndExpireTimeouts' : IDL.Func([], [IDL.Nat], []),
-    'checkDigitalInspectionDeadline' : IDL.Func([TradeId], [Result_8], []),
+    'checkDigitalInspectionDeadline' : IDL.Func([TradeId], [Result_10], []),
     'checkJuryDeadlines' : IDL.Func([], [IDL.Nat], []),
     'cleanupResolvedListings' : IDL.Func(
         [],
@@ -1823,7 +1949,7 @@ export const idlFactory = ({ IDL }) => {
         ],
         [],
       ),
-    'closeProposal' : IDL.Func([ProposalId], [Result_24], []),
+    'closeProposal' : IDL.Func([ProposalId], [Result_27], []),
     'confirmPaymentReceived' : IDL.Func([TradeId], [Result], []),
     'confirmPaymentSent' : IDL.Func([TradeId], [Result], []),
     'createListing' : IDL.Func(
@@ -1831,6 +1957,7 @@ export const idlFactory = ({ IDL }) => {
           IDL.Text,
           IDL.Text,
           ListingCategory,
+          IDL.Opt(CategoryId),
           IDL.Nat,
           TradeToken,
           ItemCondition,
@@ -1846,23 +1973,23 @@ export const idlFactory = ({ IDL }) => {
           IDL.Opt(UkrposhtaConfig),
           IDL.Opt(MeestConfig),
         ],
-        [Result_23],
+        [Result_26],
         [],
       ),
-    'createMeestTTN' : IDL.Func([TradeId], [Result_7], []),
+    'createMeestTTN' : IDL.Func([TradeId], [Result_9], []),
     'createMeestWaybill' : IDL.Func(
         [IDL.Text, IDL.Text, IDL.Float64, IDL.Text, IDL.Nat],
         [IDL.Variant({ 'ok' : IDL.Text, 'err' : IDL.Text })],
         [],
       ),
-    'createNovaPoshtaTTN' : IDL.Func([TradeId], [Result_7], []),
-    'createProposal' : IDL.Func([ProposalType, IDL.Text], [Result_22], []),
+    'createNovaPoshtaTTN' : IDL.Func([TradeId], [Result_9], []),
+    'createProposal' : IDL.Func([ProposalType, IDL.Text], [Result_25], []),
     'createUkrPoshtaWaybill' : IDL.Func(
         [IDL.Text, IDL.Text, IDL.Float64, IDL.Text, IDL.Nat],
         [IDL.Variant({ 'ok' : IDL.Text, 'err' : IDL.Text })],
         [],
       ),
-    'createUkrposhtaTTN' : IDL.Func([TradeId], [Result_7], []),
+    'createUkrposhtaTTN' : IDL.Func([TradeId], [Result_9], []),
     'createWaybill' : IDL.Func(
         [
           IDL.Text,
@@ -1876,11 +2003,7 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'deactivateListing' : IDL.Func([ListingId], [Result], []),
-    'debugGetCertifiedData' : IDL.Func(
-        [],
-        [IDL.Opt(IDL.Vec(IDL.Nat8))],
-        ['query'],
-      ),
+    'deleteSavedSearch' : IDL.Func([SavedSearchId], [Result], []),
     'demoteFromModerator' : IDL.Func([UserId], [], []),
     'estimateTokenAmount' : IDL.Func(
         [IDL.Nat, TradeToken],
@@ -1910,7 +2033,7 @@ export const idlFactory = ({ IDL }) => {
       ),
     'getCyclesStatus' : IDL.Func([], [CyclesStatus], ['query']),
     'getDashboardMetrics' : IDL.Func([], [PlatformMetrics__1], ['query']),
-    'getDigitalDelivery' : IDL.Func([TradeId], [Result_21], []),
+    'getDigitalDelivery' : IDL.Func([TradeId], [Result_24], []),
     'getDispute' : IDL.Func([DisputeId], [IDL.Opt(DisputeView)], ['query']),
     'getDisputeJurors' : IDL.Func([DisputeId], [IDL.Opt(JuryView)], ['query']),
     'getDisputesByTrade' : IDL.Func(
@@ -1934,15 +2057,32 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Vec(ListingCard)],
         ['query'],
       ),
+    'getExplorerApiKeyStatus' : IDL.Func(
+        [],
+        [
+          IDL.Record({
+            'bscScanConfigured' : IDL.Bool,
+            'infuraConfigured' : IDL.Bool,
+            'tronGridConfigured' : IDL.Bool,
+          }),
+        ],
+        ['query'],
+      ),
+    'getFavoriteListings' : IDL.Func([], [IDL.Vec(ListingCard)], ['query']),
     'getFeedbackForTrade' : IDL.Func([TradeId], [IDL.Vec(Feedback)], ['query']),
     'getJurorDashboard' : IDL.Func(
         [],
         [IDL.Vec(JurorDashboardEntry)],
         ['query'],
       ),
-    'getJuryPool' : IDL.Func([], [Result_20], ['query']),
-    'getLinkPreview' : IDL.Func([IDL.Text], [Result_19], []),
+    'getJuryPool' : IDL.Func([], [Result_23], ['query']),
+    'getLinkPreview' : IDL.Func([IDL.Text], [Result_22], []),
     'getListing' : IDL.Func([ListingId], [IDL.Opt(ListingCard)], ['query']),
+    'getListingInquiryMessages' : IDL.Func(
+        [ListingId, UserId],
+        [Result_21],
+        ['query'],
+      ),
     'getListingsByUser' : IDL.Func(
         [UserId, IDL.Nat, IDL.Nat],
         [IDL.Vec(ListingCard)],
@@ -1950,7 +2090,7 @@ export const idlFactory = ({ IDL }) => {
       ),
     'getMeestPUDOs' : IDL.Func(
         [IDL.Text, IDL.Opt(IDL.Text), IDL.Opt(IDL.Nat)],
-        [Result_18],
+        [Result_20],
         [],
       ),
     'getMetricsSummary' : IDL.Func([], [MetricsSummary], ['query']),
@@ -1958,7 +2098,7 @@ export const idlFactory = ({ IDL }) => {
     'getModuleMetrics' : IDL.Func([], [IDL.Vec(ModuleMetricsView)], ['query']),
     'getMyDisputes' : IDL.Func([], [IDL.Vec(DisputeView)], ['query']),
     'getMyFeedback' : IDL.Func([], [IDL.Vec(Feedback)], ['query']),
-    'getMyJurorDashboard' : IDL.Func([], [Result_17], ['query']),
+    'getMyJurorDashboard' : IDL.Func([], [Result_19], ['query']),
     'getMyListings' : IDL.Func(
         [IDL.Nat, IDL.Nat],
         [IDL.Vec(ListingCard)],
@@ -1984,13 +2124,13 @@ export const idlFactory = ({ IDL }) => {
       ),
     'getNovaPoshtaBranches' : IDL.Func(
         [IDL.Text, IDL.Opt(IDL.Text), IDL.Opt(IDL.Nat)],
-        [Result_16],
+        [Result_18],
         [],
       ),
-    'getNovaPoshtaCityRef' : IDL.Func([IDL.Text], [Result_7], []),
+    'getNovaPoshtaCityRef' : IDL.Func([IDL.Text], [Result_9], []),
     'getOpenDisputeQueue' : IDL.Func(
         [IDL.Nat, IDL.Nat],
-        [Result_15],
+        [Result_17],
         ['query'],
       ),
     'getP95Latency' : IDL.Func([IDL.Text, IDL.Nat], [IDL.Nat], ['query']),
@@ -2008,7 +2148,8 @@ export const idlFactory = ({ IDL }) => {
         ['query'],
       ),
     'getRequestRate' : IDL.Func([IDL.Text, IDL.Nat], [IDL.Nat], ['query']),
-    'getSellerLiability' : IDL.Func([IDL.Principal], [Result_14], ['query']),
+    'getSavedSearches' : IDL.Func([], [IDL.Vec(SavedSearch)], ['query']),
+    'getSellerLiability' : IDL.Func([IDL.Principal], [Result_16], ['query']),
     'getShippingOptions' : IDL.Func(
         [IDL.Float64, IDL.Text, IDL.Text],
         [IDL.Variant({ 'ok' : IDL.Vec(ShippingOption), 'err' : IDL.Text })],
@@ -2065,10 +2206,10 @@ export const idlFactory = ({ IDL }) => {
       ),
     'getUkrposhtaOffices' : IDL.Func(
         [IDL.Text, IDL.Opt(IDL.Text), IDL.Opt(IDL.Nat)],
-        [Result_13],
+        [Result_15],
         [],
       ),
-    'getUnifiedTrackingInfo' : IDL.Func([TradeId], [Result_12], []),
+    'getUnifiedTrackingInfo' : IDL.Func([TradeId], [Result_14], []),
     'getUnreadCount' : IDL.Func(
         [],
         [IDL.Vec(IDL.Tuple(TradeId, IDL.Nat))],
@@ -2094,38 +2235,42 @@ export const idlFactory = ({ IDL }) => {
     'incrementListingView' : IDL.Func([ListingId], [], []),
     'initiateOnChainTrade' : IDL.Func(
         [ListingId, TradeToken, IDL.Opt(ShippingSelection)],
-        [Result_11],
+        [Result_13],
         [],
       ),
     'initiateTrade' : IDL.Func(
         [ListingId, TradeToken, IDL.Opt(ShippingSelection)],
-        [Result_11],
+        [Result_13],
         [],
       ),
+    'isListingFavorite' : IDL.Func([ListingId], [IDL.Bool], ['query']),
     'leaveFeedback' : IDL.Func(
         [TradeId, UserId, IDL.Nat, IDL.Text],
-        [Result_10],
+        [Result_12],
         [],
       ),
+    'listCategories' : IDL.Func([], [IDL.Vec(CategoryNode)], ['query']),
     'markAllNotificationsRead' : IDL.Func([], [Result], []),
     'markNotificationRead' : IDL.Func([IDL.Nat], [Result], []),
     'markTradeAsRead' : IDL.Func([TradeId], [], []),
-    'openDigitalDispute' : IDL.Func([TradeId, IDL.Text], [Result_9], []),
+    'openDigitalDispute' : IDL.Func([TradeId, IDL.Text], [Result_11], []),
     'openDispute' : IDL.Func(
         [TradeId, DisputeReason, IDL.Text],
-        [Result_9],
+        [Result_11],
         [],
       ),
     'promoteToModerator' : IDL.Func([UserId], [], []),
-    'proposeCancelTrade' : IDL.Func([TradeId], [Result_8], []),
+    'proposeCancelTrade' : IDL.Func([TradeId], [Result_10], []),
     'reactivateListing' : IDL.Func([ListingId], [Result], []),
     'recordRequest' : IDL.Func([IDL.Text, IDL.Nat, IDL.Nat], [], ['oneway']),
     'recordTreasuryFee' : IDL.Func([TradeId, IDL.Nat, TradeToken], [], []),
     'refreshRates' : IDL.Func([], [IDL.Nat], []),
     'refreshVaultBalance' : IDL.Func([ChainType], [BalanceView], []),
     'registerAsJuror' : IDL.Func([IDL.Float64], [Result], []),
+    'removeFavorite' : IDL.Func([ListingId], [Result], []),
     'removeListingByAdmin' : IDL.Func([ListingId, IDL.Text], [], []),
     'reopenDispute' : IDL.Func([DisputeId], [Result], []),
+    'reportListing' : IDL.Func([ListingId, IDL.Text], [Result], []),
     'requestRefund' : IDL.Func([TradeId], [Result], []),
     'resolveDispute' : IDL.Func(
         [DisputeId, ResolutionOutcome, IDL.Text],
@@ -2137,13 +2282,15 @@ export const idlFactory = ({ IDL }) => {
         [Result],
         [],
       ),
-    'retryMeestTTNCreation' : IDL.Func([TradeId], [Result_7], []),
-    'retryTTNCreation' : IDL.Func([TradeId], [Result_7], []),
-    'retryUkrposhtaTTNCreation' : IDL.Func([TradeId], [Result_7], []),
+    'retryMeestTTNCreation' : IDL.Func([TradeId], [Result_9], []),
+    'retryTTNCreation' : IDL.Func([TradeId], [Result_9], []),
+    'retryUkrposhtaTTNCreation' : IDL.Func([TradeId], [Result_9], []),
+    'saveSearch' : IDL.Func([IDL.Text, IDL.Text], [Result_8], []),
     'searchListings' : IDL.Func(
         [
           IDL.Opt(IDL.Text),
           IDL.Opt(ListingCategory),
+          IDL.Opt(CategoryId),
           IDL.Opt(IDL.Nat),
           IDL.Opt(IDL.Nat),
           IDL.Opt(IDL.Text),
@@ -2151,9 +2298,16 @@ export const idlFactory = ({ IDL }) => {
           IDL.Opt(ShippingCarrier),
           IDL.Nat,
           IDL.Nat,
+          IDL.Opt(TradeToken),
         ],
         [IDL.Vec(ListingCard)],
         ['query'],
+      ),
+    'sendListingInquiry' : IDL.Func([ListingId, IDL.Text], [Result_7], []),
+    'sendListingInquiryReply' : IDL.Func(
+        [ListingId, UserId, IDL.Text],
+        [Result_7],
+        [],
       ),
     'sendMessage' : IDL.Func(
         [TradeId, IDL.Text, IDL.Vec(MediaAttachment)],
@@ -2214,6 +2368,7 @@ export const idlFactory = ({ IDL }) => {
           IDL.Text,
           IDL.Text,
           ListingCategory,
+          IDL.Opt(CategoryId),
           IDL.Nat,
           TradeToken,
           ItemCondition,

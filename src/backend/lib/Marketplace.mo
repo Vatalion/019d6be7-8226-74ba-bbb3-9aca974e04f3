@@ -1,8 +1,14 @@
 import Map "mo:core/Map";
 import List "mo:core/List";
 import Time "mo:core/Time";
+import Nat "mo:core/Nat";
 import Principal "mo:core/Principal";
 import Types "../types";
+import DigitalEncryption "DigitalEncryption";
+import CategoryCatalog "CategoryCatalog";
+import Int "mo:core/Int";
+import Order "mo:core/Order";
+import Array "mo:core/Array";
 
 /// Marketplace — pure stateless domain logic for listings.
 /// All functions accept state as parameters and return results without side effects.
@@ -84,9 +90,11 @@ module {
     spamTracker    : Map.Map<Types.UserId, Types.Timestamp>,
     nextId         : Nat,
     caller         : Types.UserId,
+    canisterId     : Principal,
     title          : Text,
     description    : Text,
     category       : Types.ListingCategory,
+    categoryId     : ?Types.CategoryId,
     priceAmount    : Nat,
     priceToken     : Types.TradeToken,
     condition      : Types.ItemCondition,
@@ -122,13 +130,16 @@ module {
     switch (validateDigital(isDigital, digitalFileUrl)) { case (?e) return #err(e); case null {} };
 
     let expiresAt : Types.Timestamp = now + THIRTY_DAYS_NS;
+    let resolvedCategoryId = CategoryCatalog.resolveCategoryId(categoryId, category);
+    let resolvedCategory = CategoryCatalog.nodeLegacyCategory(resolvedCategoryId);
 
     let listing : Types.Listing = {
       id              = nextId;
       seller          = caller;
       var title       = title;
       var description = description;
-      var category    = category;
+      var category    = resolvedCategory;
+      var categoryId  = resolvedCategoryId;
       var priceAmount = priceAmount;
       var priceToken  = priceToken;
       var condition   = condition;
@@ -139,6 +150,8 @@ module {
       var digitalFileUrl  = digitalFileUrl;
       var digitalFileHash = digitalFileHash;
       var digitalPassword = digitalPassword;
+      var digitalFileUrlEncrypted  = null;
+      var digitalPasswordEncrypted = null;
       var status      = #active;
       createdAt       = now;
       var expiresAt   = expiresAt;
@@ -148,6 +161,26 @@ module {
       var ukrposhtaConfig  = ukrposhtaConfig;
       var meestConfig      = meestConfig;
       var resolvedAt       = null;
+      var bumpedAt         = 0 : Types.Timestamp;
+      var promotedUntil    = null;
+    };
+
+    // Encrypt digital goods fields if this is a digital listing
+    if (isDigital) {
+      let salt = nextId.toText();
+      let key  = DigitalEncryption.deriveKey(canisterId, salt);
+      switch (digitalFileUrl) {
+        case (?url) {
+          listing.digitalFileUrlEncrypted := ?DigitalEncryption.encryptText(key, url);
+        };
+        case null {};
+      };
+      switch (digitalPassword) {
+        case (?pwd) {
+          listing.digitalPasswordEncrypted := ?DigitalEncryption.encryptText(key, pwd);
+        };
+        case null {};
+      };
     };
 
     listings.add(nextId, listing);
@@ -156,7 +189,7 @@ module {
     // For the returned card we need seller username — not available in pure lib,
     // so caller (mixin) constructs the card after receiving #ok listing id.
     // Return a minimal card with available data (sellerUsername filled by mixin).
-    #ok(toListingCardAnon(listing))
+    #ok(toListingCardAnon(listing, now))
   };
 
   // ─── Update ───────────────────────────────────────────────────────────────
@@ -169,6 +202,7 @@ module {
     title           : Text,
     description     : Text,
     category        : Types.ListingCategory,
+    categoryId      : ?Types.CategoryId,
     priceAmount     : Nat,
     priceToken      : Types.TradeToken,
     condition       : Types.ItemCondition,
@@ -196,9 +230,13 @@ module {
         switch (validateLocation(location))       { case (?e) return #err(e); case null {} };
         switch (validateDigital(listing.isDigital, digitalFileUrl)) { case (?e) return #err(e); case null {} };
 
+        let resolvedCategoryId = CategoryCatalog.resolveCategoryId(categoryId, category);
+        let resolvedCategory = CategoryCatalog.nodeLegacyCategory(resolvedCategoryId);
+
         listing.title          := title;
         listing.description    := description;
-        listing.category       := category;
+        listing.category       := resolvedCategory;
+        listing.categoryId     := resolvedCategoryId;
         listing.priceAmount    := priceAmount;
         listing.priceToken     := priceToken;
         listing.condition      := condition;
@@ -260,9 +298,28 @@ module {
 
   // ─── Card projection ──────────────────────────────────────────────────────
 
+  func isPromotedNow(l : Types.Listing, now : Types.Timestamp) : Bool {
+    switch (l.promotedUntil) {
+      case (?until) { now <= until };
+      case null false;
+    }
+  };
+
+  func compareListingsForSearch(a : Types.Listing, b : Types.Listing, now : Types.Timestamp) : Order.Order {
+    let promoA : Int = if (isPromotedNow(a, now)) 1 else 0;
+    let promoB : Int = if (isPromotedNow(b, now)) 1 else 0;
+    switch (Int.compare(promoB, promoA)) {
+      case (#equal) switch (Int.compare(b.bumpedAt, a.bumpedAt)) {
+        case (#equal) Int.compare(b.createdAt, a.createdAt);
+        case (o) o;
+      };
+      case (o) o;
+    }
+  };
+
   /// Converts a Listing to a ListingCard with anonymous seller info.
   /// Mixin enriches with real seller data from user map.
-  public func toListingCardAnon(l : Types.Listing) : Types.ListingCard {
+  public func toListingCardAnon(l : Types.Listing, now : Types.Timestamp) : Types.ListingCard {
     {
       id               = l.id;
       title            = l.title;
@@ -278,13 +335,19 @@ module {
       condition        = l.condition;
       shippingMethods  = l.shippingMethods;
       category         = l.category;
+      categoryId       = l.categoryId;
+      categorySlug     = switch (CategoryCatalog.get(l.categoryId)) {
+        case (?n) n.slug;
+        case null "";
+      };
       createdAt        = l.createdAt;
       digitalFileUrl   = switch (l.digitalFileUrl) { case (?url) url; case null "" };
+      isPromoted       = isPromotedNow(l, now);
     }
   };
 
   /// Converts a Listing to a ListingCard with seller data from User.
-  public func toListingCard(l : Types.Listing, seller : Types.User) : Types.ListingCard {
+  public func toListingCard(l : Types.Listing, seller : Types.User, now : Types.Timestamp) : Types.ListingCard {
     {
       id               = l.id;
       title            = l.title;
@@ -300,8 +363,14 @@ module {
       condition        = l.condition;
       shippingMethods  = l.shippingMethods;
       category         = l.category;
+      categoryId       = l.categoryId;
+      categorySlug     = switch (CategoryCatalog.get(l.categoryId)) {
+        case (?n) n.slug;
+        case null "";
+      };
       createdAt        = l.createdAt;
       digitalFileUrl   = switch (l.digitalFileUrl) { case (?url) url; case null "" };
+      isPromoted       = isPromotedNow(l, now);
     }
   };
 
@@ -310,11 +379,13 @@ module {
   public type SearchParams = {
     searchText     : ?Text;
     category       : ?Types.ListingCategory;
+    categoryId     : ?Types.CategoryId;
     priceMin       : ?Nat;
     priceMax       : ?Nat;
     location       : ?Text;
     condition      : ?Types.ItemCondition;
     shippingCarrier : ?Types.ShippingCarrier;
+    priceToken     : ?Types.TradeToken;
     offset         : Nat;
     limit          : Nat;
   };
@@ -333,9 +404,17 @@ module {
       case null {};
     };
 
-    switch (p.category) {
-      case (?cat) { if (l.category != cat) return false };
-      case null {};
+    switch (p.categoryId) {
+      case (?cid) {
+        let allowed = CategoryCatalog.descendants(cid);
+        if (not CategoryCatalog.containsId(allowed, l.categoryId)) return false;
+      };
+      case null {
+        switch (p.category) {
+          case (?cat) { if (l.category != cat) return false };
+          case null {};
+        };
+      };
     };
 
     switch (p.priceMin) {
@@ -370,6 +449,11 @@ module {
       case null {};
     };
 
+    switch (p.priceToken) {
+      case (?tok) { if (l.priceToken != tok) return false };
+      case null {};
+    };
+
     true
   };
 
@@ -381,18 +465,24 @@ module {
   ) : [Types.Listing] {
     let effectiveLimit = if (params.limit > MAX_PAGE_SIZE) MAX_PAGE_SIZE else params.limit;
 
-    let matched = listings.entries()
+    let now = Time.now();
+    let allMatched = listings.entries()
       .filter(func(kv : (Types.ListingId, Types.Listing)) : Bool {
         let (_, l) = kv; matchesSearch(l, params)
       })
       .map(func(kv : (Types.ListingId, Types.Listing)) : Types.Listing {
         let (_, l) = kv; l
       })
-      .drop(params.offset)
-      .take(effectiveLimit)
       .toArray();
 
-    matched
+    let sorted = allMatched.sort(func(a : Types.Listing, b : Types.Listing) : Order.Order {
+      compareListingsForSearch(a, b, now)
+    });
+
+    Array.tabulate<Types.Listing>(
+      Nat.min(effectiveLimit, if (params.offset >= sorted.size()) 0 else sorted.size() - params.offset),
+      func(i : Nat) : Types.Listing { sorted[params.offset + i] },
+    )
   };
 
   // ─── By user ──────────────────────────────────────────────────────────────

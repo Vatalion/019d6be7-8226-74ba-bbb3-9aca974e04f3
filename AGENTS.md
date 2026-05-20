@@ -1,5 +1,19 @@
 # Project Guidance
 
+## BMAD planning (canonical)
+
+Product and architecture truth lives under **`_bmad-output/planning-artifacts/`** — start with [docs/bmad/README.md](docs/bmad/README.md).
+
+| Doc | Use when |
+|-----|----------|
+| [product-brief.md](_bmad-output/planning-artifacts/product-brief.md) | Vision, constraints |
+| [prd.md](_bmad-output/planning-artifacts/prd.md) | Requirements |
+| [epics.md](_bmad-output/planning-artifacts/epics.md) | What to build next |
+| [gap-analysis.md](_bmad-output/planning-artifacts/gap-analysis.md) | Drift / course correction |
+| [implementation-readiness.md](_bmad-output/planning-artifacts/implementation-readiness.md) | Pre-sprint gate |
+
+`BACKLOG.md` and unchecked `ROADMAP.md` items are **historical** unless cross-checked with epics.
+
 ## Current State
 
 **Draft v64** | Live v43 | 16 of 16 workstreams complete
@@ -84,26 +98,25 @@ Until the project owner explicitly asks to re-enable delivery integrations:
 | On-chain encryption | `vetkd` | Secret data, private keys |
 | Wallet integration (non-II) | `wallet-integration` | ICRC signer standards |
 
-### Critical: object-storage 403 fix checklist
+### Critical: object-storage (Caffeine platform protocol)
 
-When the `blob.caffeine.ai` gateway returns `403 Forbidden: Invalid payload`, verify all of these:
+**Backend:** `_immutableObjectStorageCreateCertificate` must return `{ method = "upload"; blob_hash = hash }` on an **update** call. Do **not** use `CertifiedData.set()` for uploads — that legacy path causes `403 Invalid payload` on `blob.caffeine.ai`. Prefer `include MixinObjectStorage()` from `mo:caffeineai-object-storage` on Caffeine when available; this repo vendors the same certificate shape in `mixins/object-storage-api.mo`.
 
-1. **Load `certified-variables` skill** — read the full content before changing any code
-2. **`_immutableObjectStorageCreateCertificate(hash)` exists in backend** — the method MUST be present and public
-3. **Hash is hex-decoded before `CertifiedData.set()`** — the `hash` parameter arrives as `"sha256:<64 hex chars>"`. You MUST strip the `"sha256:"` prefix, then hex-decode the 64 hex characters into exactly 32 binary bytes. Passing the raw string as UTF-8 bytes gives ~71 bytes which gets truncated to 32 garbage bytes → gateway always rejects.
-4. **Function is `async` (update), not `query`** — `CertifiedData.set()` CANNOT be called in a query. It traps.
-5. **`backend_canister_id` reads from `env.json` at runtime** — NOT from a build-time variable (`CANISTER_ID_BACKEND` is never injected by the platform). Read from `env.json` with `cache: 'no-store'`.
-6. **`HttpAgent` host is `https://icp-api.io`** on mainnet — if it points to a placeholder like `__BACKEND_HOST__`, the agent connects to the wrong host and returns "Expected v3 response body".
-7. **Identity is passed before any `StorageClient` call** — Anonymous `HttpAgent` cannot receive a v3 certified response.
-8. **No placeholder values in `env.json`** — `project_id` and `backend_canister_id` must be real UUIDs/principal strings, not `__CAFFEINE_PROJECT_ID__` or `nogateway`.
+**Frontend:** `@caffeineai/object-storage` `StorageClient` + patch `getCertificate` to pass Internet Identity on `agent.call`. Load `backend_canister_id` and `project_id` from `/env.json` at runtime.
+
+When `blob.caffeine.ai` returns `403 Forbidden: Invalid payload`, verify:
+
+1. Live deployment (not preview/draft hostname) and signed-in Internet Identity
+2. `env.json` has real `backend_canister_id` and `project_id` (no `__PLACEHOLDER__`)
+3. `HttpAgent` host is `https://icp-api.io`
+4. Backend includes official `MixinObjectStorage`, not legacy `CertifiedData` certificate code
+5. Storage payment account has cycles budget (Cashier / `icfs cashier payment-account balance`)
 
 ### Critical: "Expected v3 response body" root cause
 
-This error from `@caffeineai/object-storage` means one of:
-- The `HttpAgent` is connecting to the wrong canister or wrong host
-- The canister method does NOT call `CertifiedData.set()` (so IC attaches no v3 certificate)
-- The agent is anonymous (no identity) — anonymous agents cannot receive certified responses
-- The canister is running in preview (object-storage is NOT connected in preview environments — test on live only)
+- Wrong `HttpAgent` host or canister id
+- Anonymous identity on certificate call
+- Preview deployment (object-storage not wired on draft URLs)
 
 ---
 

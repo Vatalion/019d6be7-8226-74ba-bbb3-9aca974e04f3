@@ -39,10 +39,21 @@ import {
   Pencil,
   PowerOff,
   RefreshCw,
+  Share2,
   ShieldCheck,
   Star,
+  Flag,
+  Sparkles,
 } from "lucide-react";
+import { FavoriteButton } from "@/components/marketplace/FavoriteButton";
+import { ListingInquiryPanel } from "@/components/marketplace/ListingInquiryPanel";
+import {
+  asEngagementActor,
+  isResultErr,
+} from "@/lib/engagementActor";
 import { useState } from "react";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { ShippingProviderSelector } from "../components/shared/ShippingProviderSelector";
 import { useLocale } from "../hooks/useLocale";
@@ -317,6 +328,8 @@ export default function ListingDetailPage() {
 
   const [selectedCarrier, setSelectedCarrier] =
     useState<ShippingCarrier | null>(ACTIVE_PHYSICAL_SHIPPING_CARRIER);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportReason, setReportReason] = useState("");
 
   const {
     data: listing,
@@ -373,6 +386,55 @@ export default function ListingDetailPage() {
   const isAdmin =
     myProfile?.role === UserRole.admin ||
     myProfile?.role === UserRole.moderator;
+
+  const reportMutation = useMutation({
+    mutationFn: async () => {
+      if (!actor || !listing) throw new Error("Not ready");
+      const reason = reportReason.trim();
+      if (!reason) throw new Error("empty");
+      return actor.reportListing(listing.id, reason);
+    },
+    onSuccess: (res) => {
+      const isErr = (r: { __kind__?: string; err?: unknown }) =>
+        r.__kind__ === "err" || (r.__kind__ === undefined && "err" in r);
+      if (isErr(res)) {
+        toast.error(tl("detail.reportError"));
+        return;
+      }
+      toast.success(tl("detail.reportSuccess"));
+      setReportOpen(false);
+      setReportReason("");
+    },
+    onError: () => toast.error(tl("detail.reportError")),
+  });
+
+  const bumpMutation = useMutation({
+    mutationFn: async () => {
+      if (!actor || !listing) throw new Error("Not ready");
+      const a = asEngagementActor(actor);
+      if (!a.bumpListing) throw new Error("Bump not available");
+      return a.bumpListing(listing.id);
+    },
+    onSuccess: (res) => {
+      if (isResultErr(res)) {
+        toast.error("Bump failed — try again in 24 hours");
+        return;
+      }
+      toast.success("Listing bumped to the top");
+      queryClient.invalidateQueries({ queryKey: ["listing", params.id] });
+    },
+    onError: () => toast.error("Could not bump listing"),
+  });
+
+  const handleShareLink = async () => {
+    const url = window.location.href;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success(tl("detail.linkCopied"));
+    } catch {
+      toast.error(tl("detail.reportError"));
+    }
+  };
 
   const removeMutation = useMutation({
     mutationFn: async () => {
@@ -576,6 +638,106 @@ export default function ListingDetailPage() {
                   <span>{listing.location}</span>
                 </div>
               )}
+              <div className="flex flex-wrap gap-2 pt-1">
+                {(listing as ListingCard & { isPromoted?: boolean }).isPromoted && (
+                  <Badge className="gap-1 bg-amber-500/20 text-amber-700 border-amber-500/40">
+                    <Sparkles className="h-3 w-3" />
+                    Promoted
+                  </Badge>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={handleShareLink}
+                  data-ocid="share-listing-btn"
+                >
+                  <Share2 className="h-3.5 w-3.5" />
+                  {tl("detail.shareLink")}
+                </Button>
+                {!isOwner && <FavoriteButton listingId={listing.id} />}
+                {!isOwner && (
+                  <ListingInquiryPanel listingId={listing.id} isOwner={false} />
+                )}
+                {!isOwner && (
+                  <AlertDialog open={reportOpen} onOpenChange={setReportOpen}>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5"
+                        data-ocid="report-listing-btn"
+                      >
+                        <Flag className="h-3.5 w-3.5" />
+                        {tl("detail.reportListing")}
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent
+                      className="bg-card border-border"
+                      data-ocid="report-listing-dialog"
+                    >
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>
+                          {tl("detail.reportTitle")}
+                        </AlertDialogTitle>
+                        <AlertDialogDescription className="text-muted-foreground">
+                          {isAuthed
+                            ? tl("detail.reportDesc")
+                            : tl("detail.signInToReport")}
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      {isAuthed ? (
+                        <div className="space-y-2 py-2">
+                          <Label htmlFor="report-reason">
+                            {tl("detail.reportReason")}
+                          </Label>
+                          <Textarea
+                            id="report-reason"
+                            data-ocid="report-reason-input"
+                            value={reportReason}
+                            onChange={(e) => setReportReason(e.target.value)}
+                            rows={4}
+                            maxLength={500}
+                          />
+                        </div>
+                      ) : null}
+                      <AlertDialogFooter>
+                        <AlertDialogCancel className="border-border">
+                          {tl("detail.cancel")}
+                        </AlertDialogCancel>
+                        {isAuthed ? (
+                          <AlertDialogAction
+                            onClick={() => reportMutation.mutate()}
+                            disabled={
+                              reportMutation.isPending ||
+                              !reportReason.trim()
+                            }
+                            data-ocid="report-submit-btn"
+                          >
+                            {tl("detail.reportSubmit")}
+                          </AlertDialogAction>
+                        ) : (
+                          <AlertDialogAction
+                            onClick={() => login()}
+                            data-ocid="report-login-btn"
+                          >
+                            <LogIn className="h-4 w-4 mr-1" />
+                            {tl("nav.connect")}
+                          </AlertDialogAction>
+                        )}
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                )}
+              </div>
+              {(listing.priceToken === TradeToken.ckUSDC ||
+                listing.priceToken === TradeToken.ckUSDT) && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  {tl("detail.onChainEscrowBeta")}
+                </p>
+              )}
             </div>
 
             <Separator />
@@ -620,6 +782,20 @@ export default function ListingDetailPage() {
                       <Pencil className="h-3.5 w-3.5" />
                       {tl("detail.editListing")}
                     </Button>
+
+                    {!isInactive && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-2"
+                        disabled={bumpMutation.isPending}
+                        onClick={() => bumpMutation.mutate()}
+                        data-ocid="bump-listing-btn"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                        Bump listing
+                      </Button>
+                    )}
 
                     {isInactive ? (
                       /* Reactivate button — shown when listing is inactive */

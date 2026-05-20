@@ -33,6 +33,9 @@ export type {
 export interface ListingCard extends _ListingCardBase {
   description: string;
   digitalFileUrl: string;
+  categoryId: bigint;
+  categorySlug: string;
+  isPromoted: boolean;
 }
 
 export {

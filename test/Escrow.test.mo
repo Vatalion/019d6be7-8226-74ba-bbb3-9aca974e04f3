@@ -45,6 +45,7 @@ func makeListing(id : Nat, seller : Principal) : Types.Listing {
     var title       = "Test";
     var description = "Test listing";
     var category    = #other;
+    var categoryId  = 1;
     var priceAmount = 1_000_000;
     var priceToken  = #USDT_TRC20;
     var condition   = #good;
@@ -61,9 +62,13 @@ func makeListing(id : Nat, seller : Principal) : Types.Listing {
     var novaPoshtaConfig = null;
     var ukrposhtaConfig  = null;
     var meestConfig      = null;
-    var digitalFileHash  = null;
-    var digitalPassword  = null;
-    var resolvedAt       = null;
+    var digitalFileHash          = null;
+    var digitalPassword           = null;
+    var digitalFileUrlEncrypted   = null;
+    var digitalPasswordEncrypted  = null;
+    var resolvedAt                = null;
+    var bumpedAt                  = Time.now();
+    var promotedUntil             = null;
   }
 };
 

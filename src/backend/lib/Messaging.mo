@@ -76,12 +76,28 @@ module {
       Runtime.trap("Message content must be between 1 and 2000 characters");
     };
 
+    /// Basic XSS guard: escape HTML special chars so content is safe to render.
+    func escapeHtml(t : Text) : Text {
+      var out = "";
+      for (ch in t.toIter()) {
+        switch (ch) {
+          case ('<') { out := out # "&lt;" };
+          case ('>') { out := out # "&gt;" };
+          case ('&') { out := out # "&amp;" };
+          case (_)    { out := out # Text.fromChar(ch) };
+        };
+      };
+      out
+    };
+
+    let safeContent = escapeHtml(content);
+
     let msgId = nextMessageId;
     let msg : Types.Message = {
       id            = msgId;
       trade         = tradeId;
       sender        = caller;
-      content       = content;
+      content       = safeContent;
       sentAt        = Time.now();
       attachmentUrl = null;   // deprecated; always null for new messages
       attachments   = attachments;

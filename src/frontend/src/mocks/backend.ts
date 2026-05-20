@@ -48,6 +48,9 @@ const sampleListing = {
   sellerRating: BigInt(48),
   priceToken: TradeToken.USDT_BEP20,
   category: ListingCategory.electronics,
+  categoryId: BigInt(1),
+  categorySlug: "elektronika",
+  isPromoted: false,
   sellerUsername: "crypto_seller_ua",
   sellerPrincipal: FAKE_PRINCIPAL,
   location: "Київ",
@@ -105,7 +108,7 @@ const samplePaymentVerification = {
   errorReason: undefined,
 };
 
-export const mockBackend: backendInterface = {
+export const mockBackend = {
   debugGetCertifiedData: async () => null,
   _immutableObjectStorageCreateCertificate: async () => {},
   _immutableObjectStorageBlobsAreLive: async () => [],
@@ -342,6 +345,11 @@ export const mockBackend: backendInterface = {
     cyclesBalanceThreshold: BigInt(1_000_000_000_000),
     errorRateThreshold: 5.0,
   }),
+  getExplorerApiKeyStatus: async () => ({
+    tronGridConfigured: false,
+    bscScanConfigured: false,
+    infuraConfigured: false,
+  }),
   getTokenInfo: async () => ({
     decimals: BigInt(6),
     token: TradeToken.USDT_BEP20,
@@ -400,6 +408,7 @@ export const mockBackend: backendInterface = {
   proposeCancelTrade: async () => ({ __kind__: "ok", ok: true }),
   registerAsJuror: async () => ({ __kind__: "ok", ok: null }),
   removeListingByAdmin: async () => undefined,
+  reportListing: async () => ({ __kind__: "ok" as const, ok: null }),
   reopenDispute: async () => ({ __kind__: "ok", ok: null }),
   requestRefund: async () => ({ __kind__: "ok", ok: null }),
   resolveDispute: async () => ({ __kind__: "ok", ok: null }),
@@ -534,6 +543,44 @@ export const mockBackend: backendInterface = {
       isDelivered: false,
     },
   }),
+  addFavorite: async () => ({ __kind__: "ok" as const, ok: null }),
+  removeFavorite: async () => ({ __kind__: "ok" as const, ok: null }),
+  isListingFavorite: async () => false,
+  getFavoriteListings: async () => [sampleListing],
+  saveSearch: async (_name: string, paramsJson: string) => ({
+    __kind__: "ok" as const,
+    ok: {
+      id: BigInt(1),
+      name: _name,
+      paramsJson,
+      createdAt: BigInt(Date.now() * 1_000_000),
+    },
+  }),
+  deleteSavedSearch: async () => ({ __kind__: "ok" as const, ok: null }),
+  getSavedSearches: async () => [],
+  sendListingInquiry: async (_lid: bigint, content: string) => ({
+    __kind__: "ok" as const,
+    ok: {
+      id: BigInt(1),
+      inquiryId: BigInt(1),
+      sender: FAKE_PRINCIPAL,
+      content,
+      createdAt: BigInt(Date.now() * 1_000_000),
+    },
+  }),
+  sendListingInquiryReply: async (_lid: bigint, _buyer: unknown, content: string) => ({
+    __kind__: "ok" as const,
+    ok: {
+      id: BigInt(2),
+      inquiryId: BigInt(1),
+      sender: FAKE_PRINCIPAL,
+      content,
+      createdAt: BigInt(Date.now() * 1_000_000),
+    },
+  }),
+  getListingInquiryMessages: async () => ({ __kind__: "ok" as const, ok: [] }),
+  bumpListing: async () => ({ __kind__: "ok" as const, ok: null }),
+  adminPromoteListing: async () => ({ __kind__: "ok" as const, ok: null }),
   getLinkPreview: async (): Promise<{ __kind__: "err"; err: { __kind__: "not_found"; not_found: null } }> => ({
     __kind__: "err" as const,
     err: { __kind__: "not_found" as const, not_found: null },
@@ -546,4 +593,4 @@ export const mockBackend: backendInterface = {
       headers: Array<{ value: string; name: string }>;
     };
   }) => args.response,
-};
+} as unknown as backendInterface;

@@ -1,6 +1,8 @@
 # Roadmap — P2P Crypto Marketplace
 
-> **Vision:** A decentralized, trustless P2P marketplace for buying and selling goods using stablecoins and on-chain wrapped tokens — with atomic swap escrow, on-chain authentication, and zero fiat.
+> **⚠️ Planning source of truth (2026-05-19):** [_bmad-output/planning-artifacts/product-brief.md](_bmad-output/planning-artifacts/product-brief.md), [prd.md](_bmad-output/planning-artifacts/prd.md) §6, [epics.md](_bmad-output/planning-artifacts/epics.md). This file is a long-range technical sketch; unchecked boxes below do not reflect current build status.
+>
+> **Vision (aligned):** OLX-style goods marketplace; stablecoin-only; pseudonymous II users; Phase 1 = coordinated wallet payment + platform rules; Phase 3 = on-chain escrow (not shipped).
 
 ---
 

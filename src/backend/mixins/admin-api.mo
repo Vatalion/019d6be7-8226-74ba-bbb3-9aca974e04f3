@@ -9,6 +9,7 @@ import Admin "../lib/Admin";
 import Auth "../lib/Auth";
 import Obs "../lib/Observability";
 import Marketplace "../lib/Marketplace";
+import Engagement "../lib/Engagement";
 
 /// admin-api mixin — exposes all admin/moderator endpoints.
 /// State is injected from main.mo.
@@ -139,6 +140,14 @@ mixin (
     errorRateThreshold     : Float;
   } {
     Admin.getSystemSettings(users, systemSettings, caller);
+  };
+
+  public shared query ({ caller }) func getExplorerApiKeyStatus() : async {
+    tronGridConfigured : Bool;
+    bscScanConfigured  : Bool;
+    infuraConfigured   : Bool;
+  } {
+    Admin.getExplorerApiKeyStatus(users, systemSettings, caller);
   };
 
   public shared ({ caller }) func updateSystemSettings(
@@ -401,6 +410,18 @@ mixin (
       photosToDelete  = allPhotos.toArray();
       skippedByDispute = skipped;
     }
+  };
+
+  /// Promote listing to VIP placement (OLX Phase B).
+  public shared ({ caller }) func adminPromoteListing(
+    id : Types.ListingId,
+  ) : async Types.Result<()> {
+    Auth.assertNotAnonymous(caller);
+    let user = Auth.requireUser(users, caller);
+    if (not Auth.isAdmin(user)) return #err(#unauthorized);
+    Engagement.promoteListing(
+      listings, id, Time.now(), Engagement.defaultPromoteDurationNs(),
+    )
   };
 
   /// Convert Unix seconds to "YYYY-MM-DD" string (Gregorian calendar).

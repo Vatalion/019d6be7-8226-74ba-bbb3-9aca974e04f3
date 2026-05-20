@@ -173,20 +173,29 @@ type ShippingCarrier =
    self_pickup;
    ukrposhta;
  };
+type SavedSearchId = nat;
+type SavedSearch = 
+ record {
+   createdAt: Timestamp;
+   id: SavedSearchId;
+   name: text;
+   owner: UserId;
+   paramsJson: text;
+ };
 type Result_9 = 
  variant {
    err: Error;
-   ok: DisputeId;
+   ok: text;
  };
 type Result_8 = 
  variant {
    err: Error;
-   ok: bool;
+   ok: SavedSearch;
  };
 type Result_7 = 
  variant {
    err: Error;
-   ok: text;
+   ok: ListingInquiryMessage;
  };
 type Result_6 = 
  variant {
@@ -198,47 +207,47 @@ type Result_5 =
    err: Error;
    ok: UserProfile;
  };
-type Result_25 = 
+type Result_28 = 
  variant {
    err: Error;
    ok: PaymentMethod;
  };
-type Result_24 = 
+type Result_27 = 
  variant {
    err: Error;
    ok: ProposalStatus;
  };
-type Result_23 = 
+type Result_26 = 
  variant {
    err: Error;
    ok: ListingCard;
  };
-type Result_22 = 
+type Result_25 = 
  variant {
    err: Error;
    ok: ProposalId;
  };
-type Result_21 = 
+type Result_24 = 
  variant {
    err: Error;
    ok: DigitalDelivery;
  };
-type Result_20 = 
+type Result_23 = 
  variant {
    err: Error;
    ok: vec JurorStats;
  };
-type Result_2 = 
- variant {
-   err: Error;
-   ok: PaymentVerificationResult;
- };
-type Result_19 = 
+type Result_22 = 
  variant {
    err: Error;
    ok: LinkPreview;
  };
-type Result_18 = 
+type Result_21 = 
+ variant {
+   err: Error;
+   ok: vec ListingInquiryMessage;
+ };
+type Result_20 = 
  variant {
    err: Error;
    ok: vec record {
@@ -248,27 +257,32 @@ type Result_18 =
              "type": text;
            };
  };
-type Result_17 = 
+type Result_2 = 
+ variant {
+   err: Error;
+   ok: PaymentVerificationResult;
+ };
+type Result_19 = 
  variant {
    err: Error;
    ok: vec JurorDashboardEntry;
  };
-type Result_16 = 
+type Result_18 = 
  variant {
    err: Error;
    ok: vec NovaPoshtaBranch;
  };
-type Result_15 = 
+type Result_17 = 
  variant {
    err: Error;
    ok: vec DisputeView;
  };
-type Result_14 = 
+type Result_16 = 
  variant {
    err: Error;
    ok: int;
  };
-type Result_13 = 
+type Result_15 = 
  variant {
    err: Error;
    ok: vec record {
@@ -277,7 +291,7 @@ type Result_13 =
              name: text;
            };
  };
-type Result_12 = 
+type Result_14 = 
  variant {
    err: Error;
    ok:
@@ -293,15 +307,25 @@ type Result_12 =
       trackingNumber: text;
     };
  };
-type Result_11 = 
+type Result_13 = 
  variant {
    err: Error;
    ok: TradeId;
  };
-type Result_10 = 
+type Result_12 = 
  variant {
    err: Error;
    ok: FeedbackId;
+ };
+type Result_11 = 
+ variant {
+   err: Error;
+   ok: DisputeId;
+ };
+type Result_10 = 
+ variant {
+   err: Error;
+   ok: bool;
  };
 type Result_1 = 
  variant {
@@ -515,6 +539,16 @@ type MediaAttachment =
    mimeType: text;
    url: text;
  };
+type ListingInquiryMessageId = nat;
+type ListingInquiryMessage = 
+ record {
+   content: text;
+   createdAt: Timestamp;
+   id: ListingInquiryMessageId;
+   inquiryId: ListingInquiryId;
+   sender: UserId;
+ };
+type ListingInquiryId = nat;
 type ListingId = nat;
 type ListingCategory = 
  variant {
@@ -528,11 +562,14 @@ type ListingCategory =
 type ListingCard = 
  record {
    category: ListingCategory;
+   categoryId: CategoryId;
+   categorySlug: text;
    condition: ItemCondition;
    createdAt: Timestamp;
    description: text;
    digitalFileUrl: text;
    id: ListingId;
+   isPromoted: bool;
    location: text;
    photos: vec text;
    priceAmount: nat;
@@ -722,6 +759,11 @@ type CyclesStatus =
    isWarning: bool;
    warningThreshold: nat;
  };
+type CreateCertificateResult = 
+ record {
+   blob_hash: text;
+   method: text;
+ };
 type ComplianceNote = 
  record {
    actorId: principal;
@@ -738,6 +780,16 @@ type ChainType =
    SPL;
    TRC20;
  };
+type CategoryNode = 
+ record {
+   id: CategoryId;
+   labelEn: text;
+   labelUk: text;
+   legacyCategory: ListingCategory;
+   parentId: opt CategoryId;
+   slug: text;
+ };
+type CategoryId = nat;
 type CarrierInfo = 
  record {
    carrier: ShippingCarrier;
@@ -780,7 +832,9 @@ service : {
    (vec bool) query;
   _immutableObjectStorageBlobsToDelete: () -> (vec text) query;
   _immutableObjectStorageConfirmBlobDeletion: (hashBytesList: vec blob) -> ();
-  _immutableObjectStorageCreateCertificate: (hash: text) -> ();
+  _immutableObjectStorageCreateCertificate: (hash: text) ->
+   (CreateCertificateResult);
+  _immutableObjectStorageUpdateGatewayPrincipals: () -> ();
   _transformResponse: (args:
    record {
      context: blob;
@@ -805,14 +859,17 @@ service : {
   addComplianceNote: (target: UserId, note: text) -> ();
   addEvidence: (disputeId: DisputeId, evidenceAttachments:
    vec MediaAttachment) -> (Result);
+  addFavorite: (listingId: ListingId) -> (Result);
   addModeratorNote: (disputeId: DisputeId, note: text) -> (Result);
   addPaymentMethod: (token: TradeToken, address: text, autoVerify: bool) ->
-   (Result_25);
+   (Result_28);
   adminGetAllTrades: () -> (vec TradeView) query;
+  adminPromoteListing: (id: ListingId) -> (Result);
   adminRemoveListing: (id: ListingId, reason: text) -> (Result);
   appealDispute: (disputeId: DisputeId, reason: text) -> (Result);
   assignJurors: (disputeId: DisputeId) -> (Result);
   banUser: (target: UserId, reason: text) -> ();
+  bumpListing: (id: ListingId) -> (Result);
   calculateShippingCost: (senderCity: text, recipientCity: text, weightKg:
    float64, serviceType: ShippingServiceType) ->
    (variant {
@@ -826,7 +883,7 @@ service : {
   castJurorVote: (disputeId: DisputeId, vote: JurorVoteChoice, reasoning:
    text) -> (Result);
   checkAndExpireTimeouts: () -> (nat);
-  checkDigitalInspectionDeadline: (tradeId: TradeId) -> (Result_8);
+  checkDigitalInspectionDeadline: (tradeId: TradeId) -> (Result_10);
   checkJuryDeadlines: () -> (nat);
   cleanupResolvedListings: () ->
    (record {
@@ -834,31 +891,32 @@ service : {
       photosToDelete: vec text;
       skippedByDispute: nat;
     });
-  closeProposal: (proposalId: ProposalId) -> (Result_24);
+  closeProposal: (proposalId: ProposalId) -> (Result_27);
   confirmPaymentReceived: (tradeId: TradeId) -> (Result);
   confirmPaymentSent: (tradeId: TradeId) -> (Result);
   createListing: (title: text, description: text, category: ListingCategory,
-   priceAmount: nat, priceToken: TradeToken, condition: ItemCondition,
-   photos: vec text, location: text, shippingMethods: vec ShippingMethod,
-   isDigital: bool, digitalFileUrl: opt text, digitalFileHash: opt text,
-   digitalPassword: opt text, packageDetails: opt PackageDetails,
-   novaPoshtaConfig: opt NovaPoshtaConfig, ukrposhtaConfig:
-   opt UkrposhtaConfig, meestConfig: opt MeestConfig) -> (Result_23);
-  createMeestTTN: (tradeId: TradeId) -> (Result_7);
+   categoryId: opt CategoryId, priceAmount: nat, priceToken: TradeToken,
+   condition: ItemCondition, photos: vec text, location: text,
+   shippingMethods: vec ShippingMethod, isDigital: bool, digitalFileUrl:
+   opt text, digitalFileHash: opt text, digitalPassword: opt text,
+   packageDetails: opt PackageDetails, novaPoshtaConfig:
+   opt NovaPoshtaConfig, ukrposhtaConfig: opt UkrposhtaConfig, meestConfig:
+   opt MeestConfig) -> (Result_26);
+  createMeestTTN: (tradeId: TradeId) -> (Result_9);
   createMeestWaybill: (senderCity: text, recipientCity: text, weightKg:
    float64, description: text, cost: nat) -> (variant {
                                                 err: text;
                                                 ok: text;
                                               });
-  createNovaPoshtaTTN: (tradeId: TradeId) -> (Result_7);
+  createNovaPoshtaTTN: (tradeId: TradeId) -> (Result_9);
   createProposal: (proposalType: ProposalType, description: text) ->
-   (Result_22);
+   (Result_25);
   createUkrPoshtaWaybill: (senderCity: text, recipientCity: text, weightKg:
    float64, description: text, cost: nat) -> (variant {
                                                 err: text;
                                                 ok: text;
                                               });
-  createUkrposhtaTTN: (tradeId: TradeId) -> (Result_7);
+  createUkrposhtaTTN: (tradeId: TradeId) -> (Result_9);
   createWaybill: (senderCity: text, recipientCity: text, weightKg: float64,
    description: text, cost: nat, serviceType: ShippingServiceType) ->
    (variant {
@@ -866,8 +924,7 @@ service : {
       ok: text;
     });
   deactivateListing: (id: ListingId) -> (Result);
-  debugGetCertifiedData: () -> (opt blob) query;
-  /// This canister's own principal — used as the escrow recipient in ICRC-2 transfers.
+  deleteSavedSearch: (id: SavedSearchId) -> (Result);
   demoteFromModerator: (target: UserId) -> ();
   estimateTokenAmount: (usdCents: nat, token: TradeToken) -> (opt nat) query;
   executeProposal: (proposalId: ProposalId) -> (Result);
@@ -879,7 +936,7 @@ service : {
   getComplianceNotes: (target: UserId) -> (vec ComplianceNote) query;
   getCyclesStatus: () -> (CyclesStatus) query;
   getDashboardMetrics: () -> (PlatformMetrics__1) query;
-  getDigitalDelivery: (tradeId: TradeId) -> (Result_21);
+  getDigitalDelivery: (tradeId: TradeId) -> (Result_24);
   getDispute: (disputeId: DisputeId) -> (opt DisputeView) query;
   getDisputeJurors: (disputeId: DisputeId) -> (opt JuryView) query;
   getDisputesByTrade: (tradeId: TradeId) -> (vec DisputeView) query;
@@ -888,21 +945,31 @@ service : {
    (vec ErrorLogEntry) query;
   getExecutionHistory: () -> (vec ProposalView) query;
   getExpiredListings: (offset: nat, limit: nat) -> (vec ListingCard) query;
+  getExplorerApiKeyStatus: () ->
+   (record {
+      bscScanConfigured: bool;
+      infuraConfigured: bool;
+      tronGridConfigured: bool;
+    }) query;
+  getFavoriteListings: () -> (vec ListingCard) query;
+  /// This canister's own principal — used as the escrow recipient in ICRC-2 transfers.
   getFeedbackForTrade: (tradeId: TradeId) -> (vec Feedback) query;
   getJurorDashboard: () -> (vec JurorDashboardEntry) query;
-  getJuryPool: () -> (Result_20) query;
-  getLinkPreview: (url: text) -> (Result_19);
+  getJuryPool: () -> (Result_23) query;
+  getLinkPreview: (url: text) -> (Result_22);
   getListing: (id: ListingId) -> (opt ListingCard) query;
+  getListingInquiryMessages: (listingId: ListingId, buyerPrincipal:
+   UserId) -> (Result_21) query;
   getListingsByUser: (userId: UserId, offset: nat, limit: nat) ->
    (vec ListingCard) query;
   getMeestPUDOs: (cityName: text, searchString: opt text, limit: opt nat) ->
-   (Result_18);
+   (Result_20);
   getMetricsSummary: () -> (MetricsSummary) query;
   getModeratorThread: (tradeId: TradeId) -> (vec Message) query;
   getModuleMetrics: () -> (vec ModuleMetricsView) query;
   getMyDisputes: () -> (vec DisputeView) query;
   getMyFeedback: () -> (vec Feedback) query;
-  getMyJurorDashboard: () -> (Result_17) query;
+  getMyJurorDashboard: () -> (Result_19) query;
   getMyListings: (offset: nat, limit: nat) -> (vec ListingCard) query;
   getMyPaymentMethods: () -> (vec PaymentMethod) query;
   getMyProfile: () -> (opt UserProfile) query;
@@ -914,9 +981,9 @@ service : {
   getMyTransactionHistory: (filter: TxHistoryFilter, offset: nat, limit:
    nat) -> (Page) query;
   getNovaPoshtaBranches: (cityName: text, searchString: opt text, limit:
-   opt nat) -> (Result_16);
-  getNovaPoshtaCityRef: (cityName: text) -> (Result_7);
-  getOpenDisputeQueue: (offset: nat, limit: nat) -> (Result_15) query;
+   opt nat) -> (Result_18);
+  getNovaPoshtaCityRef: (cityName: text) -> (Result_9);
+  getOpenDisputeQueue: (offset: nat, limit: nat) -> (Result_17) query;
   getP95Latency: (endpoint: text, windowHours: nat) -> (nat) query;
   getPaymentMethods: () -> (vec PaymentMethod) query;
   getPaymentVerificationStatus: (tradeId: TradeId) ->
@@ -926,7 +993,8 @@ service : {
   getProposals: (statusFilter: opt ProposalStatus) ->
    (vec ProposalView) query;
   getRequestRate: (endpoint: text, windowHours: nat) -> (nat) query;
-  getSellerLiability: (p: principal) -> (Result_14) query;
+  getSavedSearches: () -> (vec SavedSearch) query;
+  getSellerLiability: (p: principal) -> (Result_16) query;
   getShippingOptions: (weight: float64, fromCity: text, toCity: text) ->
    (variant {
       err: text;
@@ -945,7 +1013,6 @@ service : {
     }) query;
   getTokenInfo: (token: TradeToken) -> (opt TokenInfo) query;
   getTrade: (tradeId: TradeId) -> (opt TradeView) query;
-  /// Rolling request metrics log — FIFO, capacity 10 000.
   getTradeMessages: (tradeId: TradeId, offset: nat, limit: nat) ->
    (vec Message) query;
   getTradeNotifications: () -> (vec NotificationEvent) query;
@@ -958,8 +1025,8 @@ service : {
   getTreasuryBalance: () -> (nat) query;
   getTreasuryWithdrawals: () -> (vec WithdrawalRecord) query;
   getUkrposhtaOffices: (cityName: text, searchString: opt text, limit:
-   opt nat) -> (Result_13);
-  getUnifiedTrackingInfo: (tradeId: TradeId) -> (Result_12);
+   opt nat) -> (Result_15);
+  getUnifiedTrackingInfo: (tradeId: TradeId) -> (Result_14);
   getUnreadCount: () -> (vec record {
                                TradeId;
                                nat;
@@ -971,39 +1038,50 @@ service : {
   getVaultBalance: (chain: ChainType) -> (opt BalanceView) query;
   incrementListingView: (id: ListingId) -> ();
   initiateOnChainTrade: (listingId: ListingId, token: TradeToken,
-   shippingSelection: opt ShippingSelection) -> (Result_11);
+   shippingSelection: opt ShippingSelection) -> (Result_13);
   initiateTrade: (listingId: ListingId, token: TradeToken, shippingSelection:
-   opt ShippingSelection) -> (Result_11);
+   opt ShippingSelection) -> (Result_13);
+  isListingFavorite: (listingId: ListingId) -> (bool) query;
   leaveFeedback: (tradeId: TradeId, reviewed: UserId, rating: nat, comment:
-   text) -> (Result_10);
+   text) -> (Result_12);
+  listCategories: () -> (vec CategoryNode) query;
   markAllNotificationsRead: () -> (Result);
   markNotificationRead: (notificationId: nat) -> (Result);
   markTradeAsRead: (tradeId: TradeId) -> ();
-  openDigitalDispute: (tradeId: TradeId, reason: text) -> (Result_9);
+  openDigitalDispute: (tradeId: TradeId, reason: text) -> (Result_11);
   openDispute: (tradeId: TradeId, reason: DisputeReason, description:
-   text) -> (Result_9);
+   text) -> (Result_11);
   promoteToModerator: (target: UserId) -> ();
-  proposeCancelTrade: (tradeId: TradeId) -> (Result_8);
+  proposeCancelTrade: (tradeId: TradeId) -> (Result_10);
   reactivateListing: (id: ListingId) -> (Result);
   recordRequest: (endpoint: text, durationMs: nat, status: nat) -> () oneway;
+  /// This canister's own principal — used as the escrow recipient in ICRC-2 transfers.
   recordTreasuryFee: (tradeId: TradeId, amount: nat, token: TradeToken) -> ();
   refreshRates: () -> (nat);
+  /// This canister's own principal — used as the escrow recipient in ICRC-2 transfers.
   refreshVaultBalance: (chain: ChainType) -> (BalanceView);
   registerAsJuror: (stake: float64) -> (Result);
+  removeFavorite: (listingId: ListingId) -> (Result);
   removeListingByAdmin: (listingId: ListingId, reason: text) -> ();
   reopenDispute: (disputeId: DisputeId) -> (Result);
+  reportListing: (listingId: ListingId, reason: text) -> (Result);
   requestRefund: (tradeId: TradeId) -> (Result);
   resolveDispute: (disputeId: DisputeId, outcome: ResolutionOutcome, notes:
    text) -> (Result);
   resolveDisputeEscrow: (disputeId: DisputeId, outcome: ResolutionOutcome) ->
    (Result);
-  retryMeestTTNCreation: (tradeId: TradeId) -> (Result_7);
-  retryTTNCreation: (tradeId: TradeId) -> (Result_7);
-  retryUkrposhtaTTNCreation: (tradeId: TradeId) -> (Result_7);
+  retryMeestTTNCreation: (tradeId: TradeId) -> (Result_9);
+  retryTTNCreation: (tradeId: TradeId) -> (Result_9);
+  retryUkrposhtaTTNCreation: (tradeId: TradeId) -> (Result_9);
+  saveSearch: (name: text, paramsJson: text) -> (Result_8);
   searchListings: ("query": opt text, category: opt ListingCategory,
-   priceMin: opt nat, priceMax: opt nat, location: opt text, condition:
-   opt ItemCondition, shippingCarrier: opt ShippingCarrier, offset: nat,
-   limit: nat) -> (vec ListingCard) query;
+   categoryId: opt CategoryId, priceMin: opt nat, priceMax: opt nat,
+   location: opt text, condition: opt ItemCondition, shippingCarrier:
+   opt ShippingCarrier, offset: nat, limit: nat, priceToken:
+   opt TradeToken) -> (vec ListingCard) query;
+  sendListingInquiry: (listingId: ListingId, content: text) -> (Result_7);
+  sendListingInquiryReply: (listingId: ListingId, buyerPrincipal: UserId,
+   content: text) -> (Result_7);
   sendMessage: (tradeId: TradeId, content: text, attachments:
    vec MediaAttachment) -> (Result_6);
   setAvalancheApiKey: (apiKey: text) -> ();
@@ -1042,12 +1120,14 @@ service : {
   unbanUser: (target: UserId) -> ();
   unregisterJuror: () -> (Result);
   updateListing: (id: ListingId, title: text, description: text, category:
-   ListingCategory, priceAmount: nat, priceToken: TradeToken, condition:
-   ItemCondition, photos: vec text, location: text, shippingMethods:
-   vec ShippingMethod, digitalFileUrl: opt text, digitalFileHash: opt text,
-   digitalPassword: opt text, packageDetails: opt PackageDetails,
-   novaPoshtaConfig: opt NovaPoshtaConfig, ukrposhtaConfig:
-   opt UkrposhtaConfig, meestConfig: opt MeestConfig) -> (Result);
+   ListingCategory, categoryId: opt CategoryId, priceAmount: nat, priceToken:
+   TradeToken, condition: ItemCondition, photos: vec text, location: 
+   text, shippingMethods: vec ShippingMethod, digitalFileUrl: opt text,
+   digitalFileHash: opt text, digitalPassword: opt text, packageDetails:
+   opt PackageDetails, novaPoshtaConfig: opt NovaPoshtaConfig,
+   ukrposhtaConfig: opt UkrposhtaConfig, meestConfig: opt MeestConfig) ->
+   (Result);
+  /// Rolling request metrics log — FIFO, capacity 10 000.
   updateSystemSettings: (minTradeAmountUSD: nat, paymentTimeoutHours: 
    nat, allowedTokens: vec TradeToken, maxListingPriceUSD: nat,
    cyclesBalanceThreshold: nat, errorRateThreshold: float64) -> ();

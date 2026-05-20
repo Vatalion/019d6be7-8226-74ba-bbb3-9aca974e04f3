@@ -90,9 +90,13 @@ module {
     };
 
     // Check no existing open dispute for this trade
-    let alreadyOpen = disputes.any(func(_, d : Types.Dispute) {
-      d.trade == tradeId and (d.status == #opened or d.status == #under_review)
-    });
+    var alreadyOpen = false;
+    for (entry in disputes.entries()) {
+      let (_, d) = entry;
+      if (d.trade == tradeId and (d.status == #opened or d.status == #under_review)) {
+        alreadyOpen := true;
+      };
+    };
     if (alreadyOpen) {
       return #err(#dispute_already_open);
     };

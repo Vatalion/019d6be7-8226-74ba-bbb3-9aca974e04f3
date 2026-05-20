@@ -30,13 +30,16 @@ import VaultMixin "mixins/vault-api";
 import VaultLib "lib/Vault";
 import VaultBalances "lib/VaultBalances";
 import ObjectStorageMixin "mixins/object-storage-api";
+import Migration "migration";
+import EngagementMixin "mixins/engagement-api";
 
 
 
 
 
 
-actor self {
+(with migration = Migration.run)
+persistent actor self {
 
   // ─── Stable state ─────────────────────────────────────────────────────────
   // Enhanced orthogonal persistence — no `stable` keyword needed.
@@ -62,6 +65,9 @@ actor self {
   let listings    = Map.empty<Types.ListingId, Types.Listing>();
   let spamTracker = Map.empty<Types.UserId, Types.Timestamp>();
   let nextListingId = { var value : Nat = 0 };
+  // Listing reports (stable — kept for Caffeine upgrade compatibility)
+  let nextReportId = { var value : Nat = 0 };
+  let reports      = Map.empty<Nat, Types.ListingReport>();
 
   // Escrow domain
   let trades          = Map.empty<Types.TradeId, Types.Trade>();
@@ -160,14 +166,31 @@ actor self {
   let vaultBalanceCache : Map.Map<VaultBalances.BalanceCacheKey, VaultBalances.BalanceResult> =
     Map.empty<VaultBalances.BalanceCacheKey, VaultBalances.BalanceResult>();
 
-  // Object storage domain — blob lifecycle tracking for Caffeine gateway protocol
+  // Object storage — blob lifecycle for Caffeine gateway protocol
   let objectStorageLiveBlobs = Map.empty<Text, { hash : Text; createdAt : Int }>();
   let objectStoragePendingDelete = Set.empty<Text>();
+
+  // Engagement domain (OLX Phase B)
+  let favorites         = Map.empty<Types.UserId, Set.Set<Types.ListingId>>();
+  let savedSearches     = Map.empty<Types.UserId, List.List<Types.SavedSearch>>();
+  let nextSavedSearchId = { var value : Nat = 0 };
+  let inquiries         = Map.empty<Types.ListingInquiryId, Types.ListingInquiry>();
+  let inquiryIndex      = Map.empty<Types.ListingInquiryId, List.List<Types.ListingInquiryMessageId>>();
+  let inquiryKeyIndex     = Map.empty<Text, Types.ListingInquiryId>();
+  let inquiryMessages     = Map.empty<Types.ListingInquiryMessageId, Types.ListingInquiryMessage>();
+  let nextInquiryId       = { var value : Nat = 0 };
+  let nextInquiryMsgId    = { var value : Nat = 0 };
+  let rateLimitInquiry    = Map.empty<Principal, (Nat, Types.Timestamp)>();
 
   // ─── Mixin composition ────────────────────────────────────────────────────
 
   include AuthMixin(users, rateLimitState);
-  include MarketplaceMixin(listings, users, spamTracker, nextListingId, rateLimitCreateListing, rateLimitListingMutations);
+
+  include MarketplaceMixin(
+    listings, users, spamTracker, nextListingId,
+    rateLimitCreateListing, rateLimitListingMutations,
+    auditLog, nextAuditId, selfPrincipal,
+  );
   include EscrowMixin(users, listings, trades, cancelProposals, nextTradeId, treasuryId, selfPrincipal, disputes, nextDisputeId, processingTrades, rateLimitInitiateTrade, rateLimitConfirmPayment, systemSettings);
   include ReputationMixin(users, trades, feedbacks, userFeedbackIndex, nextFeedbackId);
   include DisputesMixin(disputes, trades, users, jurors, juryMap, nextDisputeId, selfPrincipal, rateLimitOpenDispute, rateLimitAddEvidence);
@@ -201,5 +224,20 @@ actor self {
   );
   include VaultMixin(users, vaultAddressCache, vaultBalanceCache, systemSettings);
   include ObjectStorageMixin(objectStorageLiveBlobs, objectStoragePendingDelete);
+
+  include EngagementMixin(
+    listings,
+    users,
+    favorites,
+    savedSearches,
+    nextSavedSearchId,
+    inquiries,
+    inquiryIndex,
+    inquiryKeyIndex,
+    inquiryMessages,
+    nextInquiryId,
+    nextInquiryMsgId,
+    rateLimitInquiry,
+  );
 
 }
