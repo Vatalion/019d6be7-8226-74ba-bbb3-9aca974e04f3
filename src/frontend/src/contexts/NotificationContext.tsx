@@ -1,5 +1,10 @@
 import { Variant_all_seller_buyer } from "@/backend.d";
-import type { JurorDashboardEntry, TradeId, TradeView } from "@/backend.d";
+import type {
+  JurorDashboardEntry,
+  NotificationEvent,
+  TradeId,
+  TradeView,
+} from "@/backend.d";
 import { useBackend } from "@/hooks/useBackend";
 import { useVisiblePolling } from "@/hooks/useVisiblePolling";
 import { useQuery } from "@tanstack/react-query";
@@ -47,24 +52,42 @@ export function NotificationProvider({
   children: React.ReactNode;
 }) {
   const { actor, isFetching } = useBackend();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, principal } = useAuth();
   const { locale } = useLocale();
   const navigate = useNavigate();
   const { isVisible, justBecameVisible } = useVisiblePolling();
+  const principalKey = principal?.toText() ?? "anon";
 
   // Track previous state between polls
   const prevTradeStatusRef = useRef<Map<string, string>>(new Map()); // tradeId → status
   const prevUnreadRef = useRef<Map<string, number>>(new Map()); // tradeId → count
+  const prevNotificationIdsRef = useRef<Set<string>>(new Set());
 
   // Track which toast keys have already been shown this session
   const shownToastsRef = useRef<Set<string>>(new Set());
 
   const isEnabled = isAuthenticated && !!actor && !isFetching;
 
+  // Clear diff refs on logout or account switch (principalKey scopes query cache).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset notification diff state on account switch
+  useEffect(() => {
+    if (!isAuthenticated) {
+      prevTradeStatusRef.current.clear();
+      prevUnreadRef.current.clear();
+      prevNotificationIdsRef.current.clear();
+      shownToastsRef.current.clear();
+      return;
+    }
+    prevTradeStatusRef.current.clear();
+    prevUnreadRef.current.clear();
+    prevNotificationIdsRef.current.clear();
+    shownToastsRef.current.clear();
+  }, [isAuthenticated, principalKey]);
+
   // ── Poll: trades ─────────────────────────────────────────────────────────
 
   const { data: trades = [], refetch: refetchTrades } = useQuery<TradeView[]>({
-    queryKey: ["myTrades", "notifications"],
+    queryKey: ["myTrades", principalKey],
     queryFn: async () => {
       if (!actor) return [];
       return actor.getMyTrades(Variant_all_seller_buyer.all);
@@ -78,7 +101,7 @@ export function NotificationProvider({
   const { data: unreadCounts = [], refetch: refetchUnread } = useQuery<
     Array<[TradeId, bigint]>
   >({
-    queryKey: ["unreadCount", "notifications"],
+    queryKey: ["unreadCount", "notifications", principalKey],
     queryFn: async () => {
       if (!actor) return [];
       return actor.getUnreadCount();
@@ -87,21 +110,37 @@ export function NotificationProvider({
     refetchInterval: isVisible ? POLL_INTERVAL : false,
   });
 
+  // ── Poll: backend notification events ───────────────────────────────────
+
+  const { data: tradeNotifications = [], refetch: refetchTradeNotifications } =
+    useQuery<NotificationEvent[]>({
+      queryKey: ["tradeNotifications", principalKey],
+      queryFn: async () => {
+        if (!actor) return [];
+        return actor.getTradeNotifications();
+      },
+      enabled: isEnabled,
+      refetchInterval: isVisible ? POLL_INTERVAL : false,
+    });
+
   // ── Poll: juror dashboard ─────────────────────────────────────────────────
 
   const { data: jurorCases = [], refetch: refetchJuror } = useQuery<
     JurorDashboardEntry[]
   >({
-    queryKey: ["jurorDashboard", "notifications"],
+    queryKey: ["jurorDashboard", principalKey],
     queryFn: async () => {
       if (!actor) return [];
       try {
-        return await actor.getJurorDashboard();
+        const result = await actor.getMyJurorDashboard();
+        if (result.__kind__ === "err") return [];
+        return result.ok;
       } catch {
         return [];
       }
     },
     enabled: isEnabled,
+    staleTime: 60_000,
     refetchInterval: isVisible ? POLL_INTERVAL : false,
   });
 
@@ -111,6 +150,7 @@ export function NotificationProvider({
     if (justBecameVisible && isEnabled) {
       void refetchTrades();
       void refetchUnread();
+      void refetchTradeNotifications();
       void refetchJuror();
     }
   }, [
@@ -118,6 +158,7 @@ export function NotificationProvider({
     isEnabled,
     refetchTrades,
     refetchUnread,
+    refetchTradeNotifications,
     refetchJuror,
   ]);
 
@@ -154,6 +195,42 @@ export function NotificationProvider({
     },
     [locale, navigate],
   );
+
+  const showListingToast = useCallback(
+    (message: string, listingId: string, toastKey: string) => {
+      if (shownToastsRef.current.has(toastKey)) return;
+      shownToastsRef.current.add(toastKey);
+      toast.info(message, {
+        duration: 6000,
+        action: {
+          label: translate(locale, "toast.view_listing"),
+          onClick: () =>
+            navigate({ to: "/listings/$id", params: { id: listingId } }),
+        },
+      });
+    },
+    [locale, navigate],
+  );
+
+  // ── Detect saved search match notifications ───────────────────────────────
+
+  useEffect(() => {
+    if (!tradeNotifications.length) return;
+
+    for (const event of tradeNotifications) {
+      const key = `notif:${event.id.toString()}`;
+      if (prevNotificationIdsRef.current.has(key)) continue;
+      prevNotificationIdsRef.current.add(key);
+
+      if (event.eventType === "saved_search_match") {
+        const listingId = event.tradeId.toString();
+        const label =
+          event.message.trim() ||
+          translate(locale, "notification.saved_search_match");
+        showListingToast(label, listingId, key);
+      }
+    }
+  }, [tradeNotifications, locale, showListingToast]);
 
   // ── Detect trade status changes ───────────────────────────────────────────
 

@@ -2,6 +2,8 @@
 
 import { suite; test; expect } "mo:test";
 import Map "mo:core/Map";
+import List "mo:core/List";
+import Set "mo:core/Set";
 import Principal "mo:core/Principal";
 import Auth "../src/backend/lib/Auth";
 import Types "../src/backend/types";
@@ -29,12 +31,17 @@ func insertAdmin(
     var role                 = #admin;
     createdAt                = 0;
     var reputationScore      = 0;
+    var buyerScore           = 0;
+    var sellerScore          = 0;
     var trustLevel           = #new_;
+    var kycTier              = #none;
     var isBanned             = false;
     var suspendedUntil       = null;
     var liabilityBalance     = 0;
     var liabilityHistory     = [];
     var paymentMethods       = [];
+    var linkedWallets        = [];
+    var accountClosedAt      = null;
   };
   users.add(id, user);
   user
@@ -131,6 +138,23 @@ suite("Auth — assertNotAnonymous", func() {
   });
 });
 
+suite("Auth — isBannedOrSuspended", func() {
+  test("banned user is flagged", func() {
+    let users = makeUsers();
+    ignore Auth.upsertUser(users, alice, "Alice_", "", "", null);
+    let user = Auth.requireUser(users, alice);
+    user.isBanned := true;
+    expect.bool(Auth.isBannedOrSuspended(user)).isTrue();
+  });
+
+  test("active user is not banned or suspended", func() {
+    let users = makeUsers();
+    ignore Auth.upsertUser(users, alice, "Alice_", "", "", null);
+    let user = Auth.requireUser(users, alice);
+    expect.bool(Auth.isBannedOrSuspended(user)).isFalse();
+  });
+});
+
 suite("Auth — requireUser", func() {
   test("returns user when registered", func() {
     let users  = makeUsers();
@@ -198,5 +222,93 @@ suite("Auth — toProfile / toPublicProfile", func() {
     expect.nat(profile.paymentMethods.size()).equal(0);
     expect.int(profile.liabilityBalance).equal(0);
     expect.nat(profile.liabilityHistory.size()).equal(0);
+  });
+});
+
+suite("Auth — GDPR export / delete", func() {
+  func emptyPrivacyMaps() : (
+    Map.Map<Types.ListingId, Types.Listing>,
+    Map.Map<Types.TradeId, Types.Trade>,
+    Map.Map<Types.MessageId, Types.Message>,
+    Map.Map<Types.TradeId, List.List<Types.MessageId>>,
+    Map.Map<Principal, List.List<Types.SavedSearch>>,
+    Map.Map<Principal, Set.Set<Types.ListingId>>,
+    Map.Map<Types.FeedbackId, Types.Feedback>,
+    Map.Map<Principal, List.List<Types.FeedbackId>>,
+    Map.Map<Principal, List.List<Types.NotificationEvent>>,
+  ) {
+    (
+      Map.empty<Types.ListingId, Types.Listing>(),
+      Map.empty<Types.TradeId, Types.Trade>(),
+      Map.empty<Types.MessageId, Types.Message>(),
+      Map.empty<Types.TradeId, List.List<Types.MessageId>>(),
+      Map.empty<Principal, List.List<Types.SavedSearch>>(),
+      Map.empty<Principal, Set.Set<Types.ListingId>>(),
+      Map.empty<Types.FeedbackId, Types.Feedback>(),
+      Map.empty<Principal, List.List<Types.FeedbackId>>(),
+      Map.empty<Principal, List.List<Types.NotificationEvent>>(),
+    )
+  };
+
+  test("export bundle is scoped to caller principal", func() {
+    let users = makeUsers();
+    ignore Auth.upsertUser(users, alice, "Alice_", "My bio", "", null);
+    let (listings, trades, messages, tradeIndex, savedSearches, favorites, feedbacks, userFeedbackIndex, notifications) = emptyPrivacyMaps();
+    let bundle = Auth.buildAccountExport(
+      users, listings, trades, messages, tradeIndex,
+      savedSearches, favorites, feedbacks, userFeedbackIndex, alice,
+    );
+    expect.bool(Principal.equal(bundle.principal, alice)).isTrue();
+    expect.bool(bundle.hasProfile).isTrue();
+    expect.text(bundle.profile.username).equal("Alice_");
+    expect.text(bundle.profile.bio).equal("My bio");
+  });
+
+  test("deleteMyAccount rejects wrong confirmation", func() {
+    let users = makeUsers();
+    ignore Auth.upsertUser(users, alice, "Alice_", "", "", null);
+    let (listings, trades, _, _, savedSearches, favorites, _, _, notifications) = emptyPrivacyMaps();
+    let result = Auth.deleteMyAccount(
+      users, listings, trades, savedSearches, favorites, notifications, alice, "WRONG",
+    );
+    switch result {
+      case (#err(#invalid_input(_))) {};
+      case (_) assert false;
+    };
+  });
+
+  test("deleteMyAccount anonymizes profile on DELETE", func() {
+    let users = makeUsers();
+    ignore Auth.upsertUser(users, alice, "Alice_", "secret bio", "https://x", null);
+    let (listings, trades, _, _, savedSearches, favorites, _, _, notifications) = emptyPrivacyMaps();
+    switch (Auth.deleteMyAccount(
+      users, listings, trades, savedSearches, favorites, notifications, alice, "DELETE",
+    )) {
+      case (#ok(_)) {};
+      case (#err(_)) assert false;
+    };
+    let user = Auth.requireUser(users, alice);
+    expect.text(user.bio).equal("");
+    expect.text(user.avatarUrl).equal("");
+    expect.nat(user.paymentMethods.size()).equal(0);
+    switch (user.accountClosedAt) {
+      case (?_) {};
+      case null assert false;
+    };
+    expect.bool(user.username != "Alice_").isTrue();
+  });
+
+  test("closed account cannot update profile", func() {
+    let users = makeUsers();
+    ignore Auth.upsertUser(users, alice, "Alice_", "", "", null);
+    let (listings, trades, _, _, savedSearches, favorites, _, _, notifications) = emptyPrivacyMaps();
+    ignore Auth.deleteMyAccount(
+      users, listings, trades, savedSearches, favorites, notifications, alice, "DELETE",
+    );
+    let result = Auth.upsertUser(users, alice, "NewName", "", "", null);
+    switch result {
+      case (#err(#invalid_input(_))) {};
+      case (_) assert false;
+    };
   });
 });

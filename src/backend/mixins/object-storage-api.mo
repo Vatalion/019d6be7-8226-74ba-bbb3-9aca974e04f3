@@ -7,6 +7,8 @@ import Runtime       "mo:core/Runtime";
 import Set           "mo:core/Set";
 import Text          "mo:core/Text";
 import Time          "mo:core/Time";
+import Auth          "../lib/Auth";
+import Types         "../types";
 
 /// Caffeine Immutable Object Storage protocol (gateway + scrubber).
 ///
@@ -18,6 +20,7 @@ import Time          "mo:core/Time";
 mixin (
   liveBlobs     : Map.Map<Text, { hash : Text; createdAt : Int }>,
   pendingDelete : Set.Set<Text>,
+  users         : Map.Map<Types.UserId, Types.User>,
 ) {
 
   public type CreateCertificateResult = {
@@ -110,14 +113,19 @@ mixin (
       switch (bytesToHash(hashBytes)) {
         case null {};
         case (?hash) {
-          pendingDelete.remove(hash);
-          liveBlobs.remove(hash);
+          if (pendingDelete.contains(hash)) {
+            pendingDelete.remove(hash);
+            liveBlobs.remove(hash);
+          };
         };
       };
     };
   };
 
-  public shared func _immutableObjectStorageCreateCertificate(hash : Text) : async CreateCertificateResult {
+  public shared ({ caller }) func _immutableObjectStorageCreateCertificate(hash : Text) : async CreateCertificateResult {
+    Auth.assertNotAnonymous(caller);
+    Auth.assertCallerNotBanned(users, caller);
+
     if (hash.size() == 0) {
       Runtime.trap("hash must not be empty");
     };

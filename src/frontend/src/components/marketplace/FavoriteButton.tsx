@@ -1,9 +1,6 @@
-import { Button } from "@/components/ui/button";
-import {
-  asEngagementActor,
-  isResultErr,
-} from "@/lib/engagementActor";
 import { createActor } from "@/backend";
+import { Button } from "@/components/ui/button";
+import { asEngagementActor, isResultErr } from "@/lib/engagementActor";
 import { useActor, useInternetIdentity } from "@caffeineai/core-infrastructure";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Heart } from "lucide-react";
@@ -45,7 +42,9 @@ export function FavoriteButton({ listingId, className }: Props) {
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["listing-favorite", listingId.toString()] });
+      queryClient.invalidateQueries({
+        queryKey: ["listing-favorite", listingId.toString()],
+      });
       queryClient.invalidateQueries({ queryKey: ["favorite-listings"] });
     },
     onError: () => toast.error("Could not update favorites"),
@@ -62,6 +61,7 @@ export function FavoriteButton({ listingId, className }: Props) {
       disabled={toggle.isPending}
       onClick={() => toggle.mutate()}
       data-ocid="favorite-listing-btn"
+      aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
       aria-pressed={isFavorite}
     >
       <Heart

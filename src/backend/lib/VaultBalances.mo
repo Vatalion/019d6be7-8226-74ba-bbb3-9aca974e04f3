@@ -39,6 +39,11 @@ module {
     body    : Blob;
   };
 
+  public type HttpTransform = {
+    function : shared query ({ response : HttpResponse; context : Blob }) -> async HttpResponse;
+    context  : Blob;
+  };
+
   let ic : actor { http_request : HttpRequestArgs -> async HttpResponse } =
     actor "aaaaa-aa";
 
@@ -54,7 +59,7 @@ module {
 
   public type BalanceCacheKey = Text;
 
-  let CACHE_TTL_NS : Int = 60_000_000_000; // 60 seconds in nanoseconds
+  let CACHE_TTL_NS : Nat = 60_000_000_000; // 60 seconds in nanoseconds
 
   // ─── Known contract addresses ─────────────────────────────────────────────
 
@@ -202,7 +207,12 @@ module {
     result
   };
 
-  func fetchEvmBalance(rpcUrl : Text, contractAddr : Text, walletAddr : Text) : async Nat {
+  func fetchEvmBalance(
+    rpcUrl : Text,
+    contractAddr : Text,
+    walletAddr : Text,
+    transform : ?HttpTransform,
+  ) : async Nat {
     let callData = encodeBalanceOf(walletAddr);
     let response = await ic.http_request({
       url                = rpcUrl;
@@ -210,7 +220,7 @@ module {
       headers            = [{ name = "Content-Type"; value = "application/json" }];
       body               = ?(ethCallBody(contractAddr, callData));
       method             = #post;
-      transform          = null;
+      transform          = transform;
     });
     let text = bodyText(response.body);
     switch (jsonExtract(text, "result")) {
@@ -243,11 +253,12 @@ module {
     chain     : VaultLib.ChainType,
     address   : Text,
     infuraKey : Text,
+    transform : ?HttpTransform,
   ) : async BalanceResult {
     let rpc = evmRpcUrl(chain, infuraKey);
     let (usdtContract, usdcContract) = evmContracts(chain);
-    let usdtBal = await fetchEvmBalance(rpc, usdtContract, address);
-    let usdcBal = await fetchEvmBalance(rpc, usdcContract, address);
+    let usdtBal = await fetchEvmBalance(rpc, usdtContract, address, transform);
+    let usdcBal = await fetchEvmBalance(rpc, usdcContract, address, transform);
     { chain; usdtBalance = usdtBal; usdcBalance = usdcBal; lastChecked = Time.now(); error = null }
   };
 
@@ -269,7 +280,11 @@ module {
     }
   };
 
-  func fetchTrc20Balance(address : Text, tronGridKey : Text) : async BalanceResult {
+  func fetchTrc20Balance(
+    address : Text,
+    tronGridKey : Text,
+    transform : ?HttpTransform,
+  ) : async BalanceResult {
     let url = "https://api.trongrid.io/v1/accounts/" # address # "/tokens?limit=100";
     let response = await ic.http_request({
       url                = url;
@@ -278,7 +293,7 @@ module {
         { name = "TRON-PRO-API-KEY"; value = tronGridKey },
         { name = "Accept";           value = "application/json" },
       ];
-      body = null; method = #get; transform = null;
+      body = null; method = #get; transform = transform;
     });
     if (response.status != 200) {
       return {
@@ -299,18 +314,22 @@ module {
 
   // ─── BEP20 (BSCScan) ─────────────────────────────────────────────────────
 
-  func fetchBep20Balance(address : Text, bscScanKey : Text) : async BalanceResult {
+  func fetchBep20Balance(
+    address : Text,
+    bscScanKey : Text,
+    transform : ?HttpTransform,
+  ) : async BalanceResult {
     let base = "https://api.bscscan.com/api?module=account&action=tokenbalance&tag=latest&apikey="
       # bscScanKey # "&address=" # address # "&contractaddress=";
     let usdtResp = await ic.http_request({
       url = base # USDT_BEP20; max_response_bytes = ?2048;
       headers = [{ name = "Accept"; value = "application/json" }];
-      body = null; method = #get; transform = null;
+      body = null; method = #get; transform = transform;
     });
     let usdcResp = await ic.http_request({
       url = base # USDC_BEP20; max_response_bytes = ?2048;
       headers = [{ name = "Accept"; value = "application/json" }];
-      body = null; method = #get; transform = null;
+      body = null; method = #get; transform = transform;
     });
     {
       chain       = #BEP20;
@@ -332,17 +351,17 @@ module {
     ).encodeUtf8()
   };
 
-  func fetchSplBalance(address : Text) : async BalanceResult {
+  func fetchSplBalance(address : Text, transform : ?HttpTransform) : async BalanceResult {
     let rpc = "https://api.mainnet-beta.solana.com";
     let usdtResp = await ic.http_request({
       url = rpc; max_response_bytes = ?8192;
       headers = [{ name = "Content-Type"; value = "application/json" }];
-      body = ?(splBody(address, USDT_SPL)); method = #post; transform = null;
+      body = ?(splBody(address, USDT_SPL)); method = #post; transform = transform;
     });
     let usdcResp = await ic.http_request({
       url = rpc; max_response_bytes = ?8192;
       headers = [{ name = "Content-Type"; value = "application/json" }];
-      body = ?(splBody(address, USDC_SPL)); method = #post; transform = null;
+      body = ?(splBody(address, USDC_SPL)); method = #post; transform = transform;
     });
     {
       chain       = #SPL;
@@ -364,6 +383,7 @@ module {
     infuraKey    : Text,
     tronGridKey  : Text,
     bscScanKey   : Text,
+    transform    : ?HttpTransform,
   ) : async BalanceResult {
     let key = balanceCacheKey(userId, chain);
     switch (balanceCache.get(key)) {
@@ -374,12 +394,12 @@ module {
     };
     let result : BalanceResult = try {
       switch chain {
-        case (#ERC20)     await fetchEvmChainBalance(chain, address, infuraKey);
-        case (#Polygon)   await fetchEvmChainBalance(chain, address, infuraKey);
-        case (#Avalanche) await fetchEvmChainBalance(chain, address, infuraKey);
-        case (#TRC20)     await fetchTrc20Balance(address, tronGridKey);
-        case (#BEP20)     await fetchBep20Balance(address, bscScanKey);
-        case (#SPL)       await fetchSplBalance(address);
+        case (#ERC20)     await fetchEvmChainBalance(chain, address, infuraKey, transform);
+        case (#Polygon)   await fetchEvmChainBalance(chain, address, infuraKey, transform);
+        case (#Avalanche) await fetchEvmChainBalance(chain, address, infuraKey, transform);
+        case (#TRC20)     await fetchTrc20Balance(address, tronGridKey, transform);
+        case (#BEP20)     await fetchBep20Balance(address, bscScanKey, transform);
+        case (#SPL)       await fetchSplBalance(address, transform);
       }
     } catch (_) {
       {

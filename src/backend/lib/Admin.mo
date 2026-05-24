@@ -67,9 +67,84 @@ module {
     // Phase 3 — ICRC-1 ledger canister IDs (configurable without code redeployment)
     var ckUsdcLedgerId : Text;  // ICP mainnet ckUSDC ledger canister ID
     var ckUsdtLedgerId : Text;  // ICP mainnet ckUSDT ledger canister ID
+    /// Gate C — when false, initiateOnChainTrade rejects (no user-facing on-chain CTA).
+    var trustlessEscrowEnabled : Bool;
+    /// Gate C security checklist — all must be true before enable (E9.S6).
+    var gateCTestnetE2ePassed : Bool;
+    var gateCRollbackTestsPassed : Bool;
+    var gateCSubaccountDesignReviewed : Bool;
+    var gateCBetaCapsConfigured : Bool;
+    /// Security sign-off reference (doc URL or audit id) stored on enable.
+    var gateCSecuritySignOffRef : Text;
+    /// ck on-chain beta cap in USD cents (D-034 default 500 USDT = 50_000).
+    var ckOnChainBetaCapUsdCents : Nat;
+    /// Platform fee in basis points (100 bps = 1%). 0 = use default 300 (3%) per D-001.
+    var platformFeeBps : Nat;
+    /// When true, ckUSDC/ckUSDT seller stake uses ICRC ledger moves (E6.S8 depth).
+    /// Manual-chain tokens always use internal ledger with honest copy.
+    var stakeOnChainEnabled : Bool;
     // Phase 2 — alert thresholds for admin dashboard
     var cyclesBalanceThreshold : Nat;   // cycles; default 1T = 1_000_000_000_000
     var errorRateThreshold     : Float; // percentage; default 5.0
+  };
+
+  /// Default buyer-facing platform fee: 3% (D-001).
+  public let DEFAULT_PLATFORM_FEE_BPS : Nat = 300;
+
+  /// Resolves configured bps; unset (0) falls back to admin default — never hidden.
+  public func effectivePlatformFeeBps(configuredBps : Nat) : Nat {
+    if (configuredBps == 0) DEFAULT_PLATFORM_FEE_BPS else configuredBps
+  };
+
+  /// Default ck on-chain beta cap: 500 USDT (D-034).
+  public let DEFAULT_CK_BETA_CAP_USD_CENTS : Nat = 50_000;
+
+  /// Standard beta tier ceiling: 500 USDT (D-043).
+  public let STANDARD_BETA_MAX_USD_CENTS : Nat = 50_000;
+
+  /// Elevated tier ceiling: 1000 USDT — verified seller or 10% stake (D-043).
+  public let ELEVATED_TIER_MAX_USD_CENTS : Nat = 100_000;
+
+  /// High-value ck-only threshold: >1000 USDT (D-022, D-043).
+  public let HIGH_VALUE_CK_ONLY_USD_CENTS : Nat = 100_000;
+
+  /// Hard beta reject above 5000 USDT (D-043).
+  public let MAX_BETA_TRADE_USD_CENTS : Nat = 500_000;
+
+  let SECRET_STORAGE_DISABLED_MSG : Text =
+    "Secret storage in canister state is disabled for pre-alpha; configure provider credentials through an external secret proxy before enabling live verification";
+
+  public type GateCChecklistView = {
+    testnetE2ePassed : Bool;
+    rollbackTestsPassed : Bool;
+    subaccountDesignReviewed : Bool;
+    betaCapsConfigured : Bool;
+    securitySignOffRef : Text;
+    ckBetaCapUsdCents : Nat;
+    checklistComplete : Bool;
+    trustlessEscrowEnabled : Bool;
+  };
+
+  /// All Gate C checklist items must pass before admin enable (E9.S6 AC 2).
+  public func isGateCChecklistComplete(settings : SystemSettings) : Bool {
+    settings.gateCTestnetE2ePassed
+    and settings.gateCRollbackTestsPassed
+    and settings.gateCSubaccountDesignReviewed
+    and settings.gateCBetaCapsConfigured
+    and settings.ckOnChainBetaCapUsdCents > 0
+  };
+
+  public func gateCChecklistView(settings : SystemSettings) : GateCChecklistView {
+    {
+      testnetE2ePassed = settings.gateCTestnetE2ePassed;
+      rollbackTestsPassed = settings.gateCRollbackTestsPassed;
+      subaccountDesignReviewed = settings.gateCSubaccountDesignReviewed;
+      betaCapsConfigured = settings.gateCBetaCapsConfigured;
+      securitySignOffRef = settings.gateCSecuritySignOffRef;
+      ckBetaCapUsdCents = settings.ckOnChainBetaCapUsdCents;
+      checklistComplete = isGateCChecklistComplete(settings);
+      trustlessEscrowEnabled = settings.trustlessEscrowEnabled;
+    }
   };
 
   // ─── Payment verification error log ──────────────────────────────────────
@@ -106,7 +181,7 @@ module {
   ) : Types.User {
     Auth.assertNotAnonymous(caller);
     let user = Auth.requireUser(users, caller);
-    if (not Auth.isAdmin(user)) Runtime.trap("unauthorized: admin required");
+    if (not Auth.canActAsAdmin(user)) Runtime.trap("unauthorized: admin required");
     user;
   };
 
@@ -116,7 +191,7 @@ module {
   ) : Types.User {
     Auth.assertNotAnonymous(caller);
     let user = Auth.requireUser(users, caller);
-    if (not Auth.isAdmin(user) and not Auth.isModerator(user)) {
+    if (not Auth.canActAsAdmin(user) and not Auth.canActAsModerator(user)) {
       Runtime.trap("unauthorized: admin or moderator required");
     };
     user;
@@ -151,7 +226,7 @@ module {
       action    = action;
       actorId   = actorId;
       targetId  = targetId;
-      timestamp = Time.now();
+      timestamp = Types.now();
       details   = details;
     };
     auditLog.add(entry);
@@ -320,7 +395,7 @@ module {
       id        = nextNoteId;
       note      = note;
       actorId   = caller;
-      timestamp = Time.now();
+      timestamp = Types.now();
     };
     let notesList = switch (complianceNotes.get(target)) {
       case (?lst) lst;
@@ -413,7 +488,7 @@ module {
     trades   : Map.Map<Types.TradeId, Types.Trade>,
     disputes : Map.Map<Types.DisputeId, Types.Dispute>,
   ) : PlatformMetrics {
-    let now = Time.now();
+    let now = Types.now();
     let thirtyDaysNs : Types.Timestamp = 30 * 24 * 3_600 * 1_000_000_000;
     let cutoff = now - thirtyDaysNs;
 
@@ -678,12 +753,12 @@ module {
     apiKey   : Text,
   ) : Nat {
     ignore _requireAdmin(users, caller);
-    if (apiKey.size() == 0) Runtime.trap("apiKey cannot be empty");
+    if (apiKey.size() > 0) Runtime.trap(SECRET_STORAGE_DISABLED_MSG);
     settings.novaPoshtaApiKey := apiKey;
     _appendAudit(
       auditLog, nextId,
       "setNovaPoshtaApiKey", caller, null,
-      "Nova Poshta API key updated.",
+      "Nova Poshta API key cleared.",
     );
   };
 
@@ -697,12 +772,12 @@ module {
     apiKey   : Text,
   ) : Nat {
     ignore _requireAdmin(users, caller);
-    if (apiKey.size() == 0) Runtime.trap("apiKey cannot be empty");
+    if (apiKey.size() > 0) Runtime.trap(SECRET_STORAGE_DISABLED_MSG);
     settings.ukrPoshtaApiKey := apiKey;
     _appendAudit(
       auditLog, nextId,
       "setUkrPoshtaApiKey", caller, null,
-      "Ukrposhta API key updated.",
+      "Ukrposhta API key cleared.",
     );
   };
 
@@ -716,12 +791,12 @@ module {
     apiKey   : Text,
   ) : Nat {
     ignore _requireAdmin(users, caller);
-    if (apiKey.size() == 0) Runtime.trap("apiKey cannot be empty");
+    if (apiKey.size() > 0) Runtime.trap(SECRET_STORAGE_DISABLED_MSG);
     settings.meestApiKey := apiKey;
     _appendAudit(
       auditLog, nextId,
       "setMeestApiKey", caller, null,
-      "Meest Express API key updated.",
+      "Meest Express API key cleared.",
     );
   };
 
@@ -735,11 +810,12 @@ module {
     apiKey   : Text,
   ) : Nat {
     ignore _requireAdmin(users, caller);
+    if (apiKey.size() > 0) Runtime.trap(SECRET_STORAGE_DISABLED_MSG);
     settings.tronGridApiKey := apiKey;
     _appendAudit(
       auditLog, nextId,
       "setTronGridApiKey", caller, null,
-      "TronGrid API key updated.",
+      "TronGrid API key cleared.",
     );
   };
 
@@ -753,11 +829,12 @@ module {
     apiKey   : Text,
   ) : Nat {
     ignore _requireAdmin(users, caller);
+    if (apiKey.size() > 0) Runtime.trap(SECRET_STORAGE_DISABLED_MSG);
     settings.bscScanApiKey := apiKey;
     _appendAudit(
       auditLog, nextId,
       "setBscScanApiKey", caller, null,
-      "BSCScan API key updated.",
+      "BSCScan API key cleared.",
     );
   };
 
@@ -771,11 +848,12 @@ module {
     apiKey   : Text,
   ) : Nat {
     ignore _requireAdmin(users, caller);
+    if (apiKey.size() > 0) Runtime.trap(SECRET_STORAGE_DISABLED_MSG);
     settings.infuraApiKey := apiKey;
     _appendAudit(
       auditLog, nextId,
       "setInfuraApiKey", caller, null,
-      "Infura API key updated.",
+      "Infura API key cleared.",
     );
   };
 
@@ -789,12 +867,12 @@ module {
     url      : Text,
   ) : Nat {
     ignore _requireAdmin(users, caller);
-    if (url.size() == 0) Runtime.trap("url cannot be empty");
+    if (url.size() > 0) Runtime.trap(SECRET_STORAGE_DISABLED_MSG);
     settings.solanaRpcUrl := url;
     _appendAudit(
       auditLog, nextId,
       "setSolanaRpcUrl", caller, null,
-      "Solana RPC URL updated.",
+      "Solana RPC URL cleared.",
     );
   };
 
@@ -808,11 +886,12 @@ module {
     apiKey   : Text,
   ) : Nat {
     ignore _requireAdmin(users, caller);
+    if (apiKey.size() > 0) Runtime.trap(SECRET_STORAGE_DISABLED_MSG);
     settings.polygonApiKey := apiKey;
     _appendAudit(
       auditLog, nextId,
       "setPolygonApiKey", caller, null,
-      "Polygon API key updated.",
+      "Polygon API key cleared.",
     );
   };
 
@@ -826,12 +905,120 @@ module {
     apiKey   : Text,
   ) : Nat {
     ignore _requireAdmin(users, caller);
+    if (apiKey.size() > 0) Runtime.trap(SECRET_STORAGE_DISABLED_MSG);
     settings.avalancheApiKey := apiKey;
     _appendAudit(
       auditLog, nextId,
       "setAvalancheApiKey", caller, null,
-      "Avalanche API key updated.",
+      "Avalanche API key cleared.",
     );
+  };
+
+  /// Update Gate C checklist fields. Admin only (E9.S6).
+  public func updateGateCChecklist(
+    users    : Map.Map<Types.UserId, Types.User>,
+    settings : SystemSettings,
+    auditLog : List.List<AuditEntry>,
+    nextId   : Nat,
+    caller   : Principal,
+    testnetE2ePassed : ?Bool,
+    rollbackTestsPassed : ?Bool,
+    subaccountDesignReviewed : ?Bool,
+    betaCapsConfigured : ?Bool,
+    ckBetaCapUsdCents : ?Nat,
+  ) : Nat {
+    ignore _requireAdmin(users, caller);
+    switch (testnetE2ePassed) {
+      case (?v) settings.gateCTestnetE2ePassed := v;
+      case null {};
+    };
+    switch (rollbackTestsPassed) {
+      case (?v) settings.gateCRollbackTestsPassed := v;
+      case null {};
+    };
+    switch (subaccountDesignReviewed) {
+      case (?v) settings.gateCSubaccountDesignReviewed := v;
+      case null {};
+    };
+    switch (betaCapsConfigured) {
+      case (?v) settings.gateCBetaCapsConfigured := v;
+      case null {};
+    };
+    switch (ckBetaCapUsdCents) {
+      case (?cap) {
+        if (cap == 0) Runtime.trap("ck beta cap must be > 0");
+        settings.ckOnChainBetaCapUsdCents := cap;
+      };
+      case null {};
+    };
+    _appendAudit(
+      auditLog, nextId,
+      "updateGateCChecklist", caller, null,
+      "gateC checklist updated; complete="
+        # debug_show(isGateCChecklistComplete(settings)),
+    )
+  };
+
+  /// Enable or disable on-chain ICRC escrow (Gate C). Admin only.
+  /// Enable requires complete checklist + non-empty security sign-off ref (E9.S6).
+  public func setTrustlessEscrowEnabled(
+    users    : Map.Map<Types.UserId, Types.User>,
+    settings : SystemSettings,
+    auditLog : List.List<AuditEntry>,
+    nextId   : Nat,
+    caller   : Principal,
+    enabled  : Bool,
+    securitySignOffRef : Text,
+  ) : Types.Result<Nat> {
+    ignore _requireAdmin(users, caller);
+    if (enabled) {
+      if (securitySignOffRef.size() == 0) {
+        return #err(#invalid_input(
+          "Security sign-off reference required to enable Gate C"
+        ));
+      };
+      if (not isGateCChecklistComplete(settings)) {
+        return #err(#invalid_input(
+          "Gate C checklist incomplete — enable rejected"
+        ));
+      };
+      settings.gateCSecuritySignOffRef := securitySignOffRef;
+    };
+    settings.trustlessEscrowEnabled := enabled;
+    let detail = if (enabled) {
+      "trustlessEscrowEnabled=true; securitySignOffRef=" # securitySignOffRef
+        # "; ckBetaCapUsdCents=" # debug_show(settings.ckOnChainBetaCapUsdCents)
+    } else {
+      "trustlessEscrowEnabled=false; in-flight ck trades may complete under prior rules"
+    };
+    #ok(_appendAudit(
+      auditLog, nextId,
+      "setTrustlessEscrowEnabled", caller, null,
+      detail,
+    ))
+  };
+
+  /// Assign optional KYC tier (Phase 1 admin manual; provider flow Phase 3). Admin only.
+  public func setUserKycTier(
+    users    : Map.Map<Types.UserId, Types.User>,
+    auditLog : List.List<AuditEntry>,
+    nextId   : Nat,
+    caller   : Principal,
+    target   : Types.UserId,
+    tier     : Types.KycTier,
+  ) : Nat {
+    ignore _requireAdmin(users, caller);
+    switch (users.get(target)) {
+      case null Runtime.trap("user not found");
+      case (?user) {
+        user.kycTier := tier;
+        _appendAudit(
+          auditLog, nextId,
+          "setUserKycTier", caller, ?target.toText(),
+          "kycTier=" # debug_show(tier),
+        );
+      };
+    };
   };
 
 }

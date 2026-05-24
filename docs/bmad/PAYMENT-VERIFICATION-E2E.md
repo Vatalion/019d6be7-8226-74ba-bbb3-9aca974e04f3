@@ -1,50 +1,98 @@
-# Payment verification — manual E2E (Phase 1)
+# Payment Verification E2E — Manual Stablecoin Path
 
-Phase 1 trades use **wallet-to-wallet** stablecoin transfer. On-chain verification is **optional** and does not custody funds on the platform.
+**Status:** Phase 1.5 implementation spec
+**Updated:** 2026-05-23
+**Decision refs:** D-002, D-011, D-015, D-016, D-024, D-044
+
+Phase 1.5 manual settlement is **platform-coordinated explorer verification**, not trustless escrow and not seller-only confirmation. A trade must never enter `payment_verified`, `shipped`, `complete`, or payout-eligible state unless the submitted transaction matches the PaymentIntent through the configured explorer path.
+
+---
+
+## Scope
+
+| Network | Wave 1 behavior |
+|---------|-----------------|
+| USDT TRC20 | Enabled manual settlement with explorer verification |
+| USDT BEP20 | Enabled manual settlement with explorer verification |
+| USDT ERC20 | Buyer-facing token catalog only; settlement enablement deferred to E4.S8/D-044 |
+| USDC ERC20 | Buyer-facing token catalog only; settlement enablement deferred to E4.S8/D-044 |
+
+Seller “received payment” is only an auxiliary human signal. It must not advance paid/verified state without explorer match.
+
+---
 
 ## Preconditions
 
-- Two Internet Identity principals (buyer + seller), both with completed onboarding.
-- An active listing priced in an approved token (e.g. **USDT_TRC20**).
-- Buyer has test USDT on Tron (TRC20) and the seller’s wallet address for that network.
+- Seller has confirmed the trade within 24h (E3.S7).
+- PaymentIntent exists (E3.S10) and records:
+  - trade id
+  - token and network
+  - expected token contract
+  - buyer principal and expected buyer wallet, if bound
+  - seller recipient wallet snapshot
+  - exact amount including buyer-facing fee rules
+  - creation time and 72h expiry
+  - manual path vs ck path
+- Explorer API key for the selected network is configured.
+
+---
 
 ## Happy path
 
-1. Buyer opens the listing and starts a trade.
-2. On the trade page, read **Phase 1 — wallet-to-wallet payment** (`data-ocid="payment-phase-notice"`).
-3. Buyer sends USDT on TRC20 to the seller’s address (outside the app).
-4. Buyer taps **I have sent the payment** (`data-ocid="btn-payment-sent"`).
-5. Trade status becomes `buyer_confirmed`; **Payment verification** widget appears.
-6. Buyer pastes the Tron transaction hash and submits verify.
-7. Expect `verified` or a clear error (wrong network, amount mismatch, pending).
-8. Seller confirms **I have received the payment** (or delivery flow if tracking applies).
-9. Trade reaches `complete`.
+1. Buyer opens a seller-confirmed trade.
+2. App displays PaymentIntent details: network, token, recipient, amount, fee, expiry, and warning that this is not trustless escrow.
+3. Buyer sends the exact token amount to the PaymentIntent recipient on the selected network.
+4. Buyer submits transaction hash.
+5. Backend verifies via explorer/API outcall.
+6. Verification succeeds only if all checks match:
+   - chain/network
+   - token contract
+   - from wallet, when buyer wallet is bound
+   - to wallet = PaymentIntent recipient snapshot
+   - amount and decimals
+   - confirmations/finality threshold
+   - tx timestamp within PaymentIntent window
+   - tx hash not already used by another trade
+7. Trade advances to `payment_verified`.
+8. Seller can mark shipped only after `payment_verified` / `funded_locked`.
 
-## Admin prerequisites (live)
+---
 
-1. Sign in as **admin** → **Admin** → **Settings** tab.
-2. Scroll to **Blockchain explorer API keys** and save:
-   - **TronGrid** — TRC20 (`verifyPayment` for `#USDT_TRC20`)
-   - **BSCScan** — BEP20 (`#USDT_BEP20`)
-   - **Infura** — ERC20 / USDC (`#USDT_ERC20`, `#USDC_ERC20`)
-3. Status chips show **Configured** / **Not configured** (keys are never displayed after save).
+## Fail-closed cases
 
-Without keys, `verifyPayment` may fail or return pass-through for address checks — manual seller confirmation still works.
+| Case | Required behavior |
+|------|-------------------|
+| Explorer key missing | Reject verification; keep trade pending/manual_review |
+| Explorer/API unavailable | Reject verification; keep trade pending/manual_review |
+| Wrong network/token/contract | Reject; no paid state |
+| Underpay/overpay outside tolerance | Reject; no paid state; support copy explains mismatch |
+| Wrong recipient | Reject; no paid state |
+| Reused tx hash | Reject; audit entry |
+| PaymentIntent expired | Do not write `payment_verified`; require admin review or new intent |
+| Seller confirms receipt only | Record optional note; do not advance paid state |
+| ck path already funded | Reject manual verification; one settlement path per trade |
 
-## What we do not prove in CI
+---
 
-- Live Tron RPC / third-party indexer responses (environment-dependent).
-- Real II sessions in Playwright (see caffeine-cli flow templates that require saved profile).
+## Test requirements
 
-## Automated coverage today
+| Test | Story | Module |
+|------|-------|--------|
+| Valid TRC20 tx match | E3.S10/E4.S2 | `Payments.test.mo` |
+| Valid BEP20 tx match | E3.S10/E4.S2 | `Payments.test.mo` |
+| Wrong token/network/amount/recipient | E3.S10/E4.S2 | `Payments.test.mo` |
+| Missing explorer config fail-closed | E4.S2 | `Payments.test.mo` |
+| Duplicate tx hash rejected | E4.S2 | `Payments.test.mo` |
+| Late verify after expiry rejected | E3.S10 | `Payments.test.mo` |
+| Manual and ck path mutually exclusive | E3.S10/E9.S2 | `Payments.test.mo` |
+| Seller cannot ship before verified | E3.S10/E7.S3 | `Escrow.test.mo` |
 
-- `test/Payments.test.mo` — amount formatting and validation helpers.
-- Live smoke/flows via `caf app smoke` and `caf app flow` in **caffeine-cli** (headed II flows excluded).
+---
 
-## Failure cases to spot-check manually
+## What CI does not prove
 
-| Step | Symptom | Likely cause |
-|------|---------|----------------|
-| Verify | Invalid hash | Wrong network or typo |
-| Verify | Amount mismatch | Sent less than trade amount |
-| Seller confirm | Blocked | Trade not in `buyer_confirmed` / `payment_verified` |
+- Live explorer uptime or third-party indexer correctness.
+- Real Internet Identity browser sessions in headless tests.
+- Counsel/regulatory approval.
+
+These remain launch checklist items, not substitutes for fail-closed unit and integration tests.

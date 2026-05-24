@@ -9,58 +9,39 @@ Product and architecture truth lives under **`_bmad-output/planning-artifacts/`*
 | [product-brief.md](_bmad-output/planning-artifacts/product-brief.md) | Vision, constraints |
 | [prd.md](_bmad-output/planning-artifacts/prd.md) | Requirements |
 | [epics.md](_bmad-output/planning-artifacts/epics.md) | What to build next |
+| [_bmad-output/implementation-artifacts/stories/index.md](_bmad-output/implementation-artifacts/stories/index.md) | BMAD user stories (full) |
 | [gap-analysis.md](_bmad-output/planning-artifacts/gap-analysis.md) | Drift / course correction |
 | [implementation-readiness.md](_bmad-output/planning-artifacts/implementation-readiness.md) | Pre-sprint gate |
 
 `BACKLOG.md` and unchecked `ROADMAP.md` items are **historical** unless cross-checked with epics.
 
+**Execution status and feature truth:** use [epics.md](_bmad-output/planning-artifacts/epics.md) and [traceability-matrix.md](_bmad-output/planning-artifacts/traceability-matrix.md) — not the table below. Code may exist for product-deferred surfaces (vault, jury, carriers).
+
 ## Current State
 
-**Draft v64** | Live v43 | 16 of 16 workstreams complete
-
----
-
-## Features Implemented
-
-All features below are implemented in the canister backend and reflected in the frontend. All builds are draft-only — no live deployment since v43.
-
-| Feature | Module(s) | Status |
-|---|---|---|
-| Vault address derivation (base58 Solana, base58check Tron) | `Vault.mo`, `Base58.mo`, `vault-api.mo` | ✅ Complete |
-| Price oracle — CoinGecko integration with 5-min cache | `Payments.mo`, `payments-api.mo` | ✅ Complete |
-| Reputation gates — progressive trade limits (3 tiers: $1k/$5k/$100k) | `Reputation.mo`, `reputation-api.mo` | ✅ Complete |
-| Multi-carrier shipping — Nova Poshta, Ukrposhta, Meest with trade-scoped TTN creation, retry logic, branch/PUDO lookup | `Shipping.mo`, `shipping-api.mo` | ✅ Complete |
-| Unified tracking timeline with auto-refresh (30s polling) | `shipping-api.mo`, `ShippingTracker.tsx` | ✅ Complete |
-| Digital goods atomic delivery with 24h inspection period and dispute protection | `Escrow.mo`, `escrow-api.mo`, `types.mo` | ✅ Complete |
-| Dispute jury consensus with 72h timelock and auto-resolution; admin escalation on tie/timeout | `Disputes.mo`, `disputes-api.mo` | ✅ Complete |
-| Global liability tracking and cross-collateral seizure | `Reputation.mo`, `escrow-api.mo` | ✅ Complete |
-| Payment method UX — clipboard detection, QR scanner, contextual hints per network | `WalletQRScanner.tsx` | ✅ Complete |
-| Crypto address verification Level 2 — on-chain RPC checks via HTTPS outcalls (BSCScan/Etherscan/PolygonScan/TronGrid/Solana RPC), 24h cache | `payments-api.mo`, `backend.d.ts` | ✅ Complete |
-| Real-time notifications — toasts, badge counters, deadline warnings (30s polling) | `NotificationContext.tsx`, `messaging-api.mo` | ✅ Complete |
-| Cascading location picker (oblast → city) + stablecoin network selection dialog | `CascadingLocationPicker.tsx`, `NetworkSelectionDialog.tsx` | ✅ Complete |
-| Admin observability dashboard — P95 latency, volume graphs, canister health, alert thresholds | `Observability.mo`, `admin-api.mo`, `Phase2MetricsPanel.tsx` | ✅ Complete |
-| Security hardening — anonymous guards on all update endpoints, rate limits (4 endpoints), reentrancy guard on escrow, enhanced input validation | `Auth.mo`, `RateLimiter.mo`, `Escrow.mo`, all mixins | ✅ Complete |
+Use [epics.md](_bmad-output/planning-artifacts/epics.md), [traceability-matrix.md](_bmad-output/planning-artifacts/traceability-matrix.md), and current Caffeine verification output for live/draft status. Do not rely on stale draft numbers in docs.
 
 ---
 
 ## User Preferences
 
-- Payments support stablecoins only across all major blockchains: USDT and USDC on TRC20 (Tron), BEP20 (BSC), ERC20 (Ethereum), SPL (Solana), Polygon, Avalanche — no ICP-native tokens (ckBTC, ICP) in payment methods
+- Buyer-facing token catalog is exactly four stablecoin options: USDT TRC20, USDT BEP20, USDT ERC20, and USDC ERC20. Wave 1 implementation enables manual settlement only for USDT TRC20 + USDT BEP20 per D-002; ERC20 manual enablement is Wave 3 (E4.S8/D-044). Broader backend enums, vault helpers, and ckUSDC/ckUSDT escrow paths are product-deferred and must not be exposed as normal payment methods without owner approval/Gate C.
 - Shipping integrations (Nova Poshta, Ukrposhta, Meest Express) must use HTTPS outcalls from Motoko canisters — never call shipping APIs directly from the React frontend
 - All agents must load relevant ICP skills BEFORE implementing any ICP-related feature
 - Full skills reference: `/ICP-SKILLS.md` (rebuilt from official sources 2026-04-14)
 
-## Temporary Delivery UI Lock
+## Delivery Scope For Phase 1.5
 
-Effective 2026-05-09, all physical delivery carrier options are intentionally disabled in the user interface. The only active physical fulfillment method is `ShippingCarrier.self_pickup`.
+The historical 2026-05-09 pickup-only UI lock is superseded for the Phase 1.5 implementation plan by the owner-approved User Product Contract: physical delivery is **Nova Poshta only** (E7.S3/D-012), while self-pickup/meetup remain hidden and product-deferred (E7.S1/D-045).
 
-Until the project owner explicitly asks to re-enable delivery integrations:
+When implementing E7.S3:
 
-- do not restore Nova Poshta, Ukrposhta, or Meest as selectable options in listing creation, listing detail purchase flow, marketplace filters, or checkout-like UI;
+- re-enable only Nova Poshta as the selectable/default physical carrier in listing creation, listing detail purchase flow, marketplace filters, and checkout-like UI;
+- do not restore Ukrposhta, Meest, self-pickup, or meetup as user-facing options without a new owner decision;
 - do not re-enable package-dimension forms, sender branch/PUDO selectors, carrier rate comparison, or carrier config toggles in the listing creation flow;
-- non-digital listing create/update payloads must continue to use `self_pickup` and must send `null` carrier configs for Nova Poshta, Ukrposhta, and Meest;
+- non-digital listing create/update payloads must use Nova Poshta carrier config once E7.S3 ships; before E7.S3 is implemented, keep the current guard in place and do not claim Phase 1.5 shipping is live;
 - keep backend shipping modules intact unless explicitly instructed otherwise, because this is a temporary frontend/product lock, not a request to delete the shipping infrastructure;
-- the source-of-truth frontend guard is `src/frontend/src/lib/deliveryPolicy.ts`; leave `PHYSICAL_DELIVERY_LOCKED_TO_PICKUP` enabled unless the owner gives a new instruction.
+- the source-of-truth frontend guard is `src/frontend/src/lib/deliveryPolicy.ts`; E7.S3 is the owner-approved instruction to flip the physical delivery policy from pickup-only to Nova Poshta-only.
 
 ---
 

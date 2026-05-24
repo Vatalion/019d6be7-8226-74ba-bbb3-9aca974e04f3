@@ -15,7 +15,7 @@
 | **Category-specific fields** | Hundreds (rooms, m², brand, year, size, fuel, etc.) | Title, description, condition, location text, photos | **~95%+** missing |
 | **Discovery & homepage** | Category grid, VIP/promoted, popular queries, geo | Featured listings, search, 6-category filter | **~60%** missing |
 | **Listing lifecycle** | Bump, promote, packages, stats, expiry | Create, edit, deactivate | **~50%** missing |
-| **Buyer engagement** | Favorites, saved search alerts, call/chat from ad | Trade-only chat; no favorites | **~70%** missing |
+| **Buyer engagement** | Favorites, saved search alerts, call/chat from ad | Favorites, saved searches + in-app alerts, listing inquiry; trade chat | **~40%** missing (no phone/call) |
 | **Contact before deal** | Phone + OLX chat from listing | Buy → trade only | Different model |
 | **Delivery** | OLX Delivery (integrated) | Pickup MVP; carriers in backend, UI locked | **~80%** missing |
 | **Payments** | Fiat + delivery escrow | Crypto P2P + platform trade state | Different (by design) |
@@ -227,7 +227,7 @@ It did **not** add: taxonomy, favorites, promotion, pre-trade chat, verticals, O
 ### Phase E — Crypto differentiation (already started)
 
 1. Phase 1 coordinated pay (done)  
-2. Phase 3 ICRC escrow (`TRUSTLESS-SETTLEMENT-DESIGN.md`)  
+2. Phase 3 ICRC escrow (`ONCHAIN-SETTLEMENT-DESIGN.md`)  
 
 **“100% functional clone”** = Phases **A through D** + parity testing against OLX flows, **plus** crypto layer — estimate **many months**, not one agent session.
 

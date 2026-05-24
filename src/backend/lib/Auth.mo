@@ -1,8 +1,13 @@
 import Principal "mo:core/Principal";
 import Map "mo:core/Map";
+import List "mo:core/List";
+import Set "mo:core/Set";
 import Runtime "mo:core/Runtime";
 import Time "mo:core/Time";
 import Types "../types";
+import Marketplace "../lib/Marketplace";
+import Escrow "../lib/Escrow";
+import ExportMapper "../lib/ExportMapper";
 
 /// Auth — principal validation, RBAC helpers, ban/suspension checks.
 /// All functions are pure (no side effects) — they operate on injected state.
@@ -51,6 +56,26 @@ module {
     };
   };
 
+  public func isBannedOrSuspended(user : Types.User) : Bool {
+    if (user.isBanned) return true;
+    switch (user.suspendedUntil) {
+      case (?until) Types.now() < until;
+      case null false;
+    }
+  };
+
+  /// Active admin — role flag and not banned/suspended (F-033).
+  public func canActAsAdmin(user : Types.User) : Bool {
+    if (isBannedOrSuspended(user)) return false;
+    isAdmin(user)
+  };
+
+  /// Active moderator (includes admin) — not banned/suspended (F-033).
+  public func canActAsModerator(user : Types.User) : Bool {
+    if (isBannedOrSuspended(user)) return false;
+    isModerator(user)
+  };
+
   public func getRole(user : Types.User) : Types.UserRole {
     user.role
   };
@@ -59,17 +84,20 @@ module {
 
   /// Traps if the user is banned or currently suspended.
   public func assertNotBanned(user : Types.User) : () {
-    if (user.isBanned) {
-      Runtime.trap("user is banned");
-    };
-    switch (user.suspendedUntil) {
-      case (?until) {
-        if (Time.now() < until) {
-          Runtime.trap("user is suspended");
-        };
+    if (isBannedOrSuspended(user)) {
+      if (user.isBanned) {
+        Runtime.trap("user is banned");
       };
-      case null {};
+      Runtime.trap("user is suspended");
     };
+  };
+
+  /// Requires registered user and traps if banned/suspended (financial mutators).
+  public func assertCallerNotBanned(
+    users : Map.Map<Principal, Types.User>,
+    caller : Principal,
+  ) : () {
+    assertNotBanned(requireUser(users, caller));
   };
 
   // ─── Profile conversion ───────────────────────────────────────────────────
@@ -85,12 +113,17 @@ module {
       role             = user.role;
       createdAt        = user.createdAt;
       reputationScore  = user.reputationScore;
+      buyerScore       = user.buyerScore;
+      sellerScore      = user.sellerScore;
       trustLevel       = user.trustLevel;
+      kycTier          = user.kycTier;
       isBanned         = user.isBanned;
-      suspendedUntil   = user.suspendedUntil;
+      suspendedUntil   = Types.optNat(user.suspendedUntil);
       liabilityBalance = user.liabilityBalance;
       liabilityHistory = user.liabilityHistory;
       paymentMethods   = user.paymentMethods;
+      linkedWallets    = user.linkedWallets;
+      accountClosedAt  = Types.optNat(user.accountClosedAt);
     }
   };
 
@@ -106,12 +139,17 @@ module {
       role             = user.role;
       createdAt        = user.createdAt;
       reputationScore  = user.reputationScore;
+      buyerScore       = user.buyerScore;
+      sellerScore      = user.sellerScore;
       trustLevel       = user.trustLevel;
+      kycTier          = user.kycTier;
       isBanned         = user.isBanned;
-      suspendedUntil   = user.suspendedUntil;
+      suspendedUntil   = Types.optNat(user.suspendedUntil);
       liabilityBalance = 0;
       liabilityHistory = [];
       paymentMethods   = [];
+      linkedWallets    = [];
+      accountClosedAt  = Types.optNat(user.accountClosedAt);
     }
   };
 
@@ -121,6 +159,9 @@ module {
   let MIN_USERNAME_LEN : Nat = 3;
   let MAX_BIO_LEN      : Nat = 500;
   let MAX_AVATAR_LEN   : Nat = 512;
+  let DELETE_CONFIRMATION : Text = "DELETE";
+  let MAX_EXPORT_LISTINGS : Nat = 500;
+  let MAX_EXPORT_MESSAGES : Nat = 2_000;
 
   /// Returns true if the character is alphanumeric, a space, or an underscore.
   func isValidUsernameChar(c : Char) : Bool {
@@ -219,6 +260,10 @@ module {
 
     let profile = switch (users.get(caller)) {
       case (?existing) {
+        switch (existing.accountClosedAt) {
+          case (?_) return #err(#invalid_input("Account is closed"));
+          case null {};
+        };
         // Update mutable profile fields
         existing.username  := username;
         existing.bio       := bio;
@@ -233,19 +278,207 @@ module {
           var bio                  = bio;
           var avatarUrl            = avatarUrl;
           var role                 = #user;
-          createdAt                = Time.now();
+          createdAt                = Types.now();
           var reputationScore      = 0;
+          var buyerScore           = 0;
+          var sellerScore          = 0;
           var trustLevel           = #new_;
+          var kycTier              = #none;
           var isBanned             = false;
           var suspendedUntil       = null;
           var liabilityBalance     = 0;
           var liabilityHistory     = [];
           var paymentMethods       = [];
+          var linkedWallets        = [];
+          var accountClosedAt      = null;
         };
         users.add(caller, newUser);
         toProfile(newUser)
       };
     };
     #ok(profile)
+  };
+
+  // ─── GDPR export / account closure ────────────────────────────────────────
+
+  func isTradeParticipant(trade : Types.Trade, userId : Types.UserId) : Bool {
+    Principal.equal(trade.buyer, userId) or Principal.equal(trade.seller, userId)
+  };
+
+  func isBlockingTradeStatus(status : Types.TradeStatus) : Bool {
+    switch (status) {
+      case (#complete or #refunded or #cancelled or #cancelled_no_seller_response or #cancelled_buyer_pre_ship) false;
+      case (_) true;
+    }
+  };
+
+  func takeChars(t : Text, max : Nat) : Text {
+    var acc = "";
+    var n : Nat = 0;
+    for (c in t.chars()) {
+      if (n >= max) break;
+      acc #= Text.fromChar(c);
+      n += 1;
+    };
+    acc
+  };
+
+  func deletedUsername(userId : Types.UserId) : Text {
+    "del_" # takeChars(userId.toText(), 20)
+  };
+
+  func collectFeedback(
+    feedbacks         : Map.Map<Types.FeedbackId, Types.Feedback>,
+    userFeedbackIndex : Map.Map<Types.UserId, List.List<Types.FeedbackId>>,
+    userId            : Types.UserId,
+  ) : [Types.Feedback] {
+    switch (userFeedbackIndex.get(userId)) {
+      case null [];
+      case (?ids) {
+        ids.toArray().filterMap<Types.FeedbackId, Types.Feedback>(func(fid) {
+          feedbacks.get(fid)
+        })
+      };
+    }
+  };
+
+  func collectTradeMessages(
+    trades     : Map.Map<Types.TradeId, Types.Trade>,
+    tradeIndex : Map.Map<Types.TradeId, List.List<Types.MessageId>>,
+    messages   : Map.Map<Types.MessageId, Types.Message>,
+    userId     : Types.UserId,
+    maxCount   : Nat,
+  ) : [Types.AccountMessageExport] {
+    var buf = List.empty<Types.AccountMessageExport>();
+    var count : Nat = 0;
+    label outer for (t in trades.values()) {
+      if (count >= maxCount) { break outer };
+      if (not isTradeParticipant(t, userId)) { continue outer };
+      switch (tradeIndex.get(t.id)) {
+        case null {};
+        case (?ids) {
+          for (msgId in ids.toArray().vals()) {
+            if (count >= maxCount) { break outer };
+            switch (messages.get(msgId)) {
+              case (?m) {
+                buf.add(ExportMapper.toMessageExport(t.id, m));
+                count += 1;
+              };
+              case null {};
+            };
+          };
+        };
+      };
+    };
+    buf.toArray()
+  };
+
+  /// Builds a principal-scoped export bundle (no other users' private data).
+  public func buildAccountExport(
+    users             : Map.Map<Types.UserId, Types.User>,
+    listings          : Map.Map<Types.ListingId, Types.Listing>,
+    trades            : Map.Map<Types.TradeId, Types.Trade>,
+    messages          : Map.Map<Types.MessageId, Types.Message>,
+    tradeIndex        : Map.Map<Types.TradeId, List.List<Types.MessageId>>,
+    savedSearches     : Map.Map<Types.UserId, List.List<Types.SavedSearch>>,
+    favorites         : Map.Map<Types.UserId, Set.Set<Types.ListingId>>,
+    feedbacks         : Map.Map<Types.FeedbackId, Types.Feedback>,
+    userFeedbackIndex : Map.Map<Types.UserId, List.List<Types.FeedbackId>>,
+    caller            : Types.UserId,
+  ) : Types.AccountExportBundle {
+    let now = Types.exportInt(Types.now());
+    let (hasProfile, profile) = switch (users.get(caller)) {
+      case (?u) (true, ExportMapper.toProfileExport(u));
+      case null (false, ExportMapper.emptyProfileExport(caller));
+    };
+
+    let listingRows = Marketplace.getListingsByUser(listings, caller, 0, MAX_EXPORT_LISTINGS);
+    let listingCards = listingRows.map(func(l : Types.Listing) : Types.ListingCard {
+      switch (users.get(caller)) {
+        case (?seller) Marketplace.toListingCard(l, seller, Types.now());
+        case null Marketplace.toListingCardAnon(l, Types.now());
+      }
+    }).map(ExportMapper.toListingCardExport);
+
+    let tradeViews = Escrow.getMyTrades(trades, caller, #all).map(ExportMapper.toTradeViewExport);
+    let msgExports = collectTradeMessages(trades, tradeIndex, messages, caller, MAX_EXPORT_MESSAGES);
+
+    let searches = switch (savedSearches.get(caller)) {
+      case (?rows) rows.toArray().map(ExportMapper.toSavedSearchExport);
+      case null [];
+    };
+
+    let favIds = switch (favorites.get(caller)) {
+      case (?s) s.toArray();
+      case null [];
+    };
+
+    let feedbackRows = collectFeedback(feedbacks, userFeedbackIndex, caller).map(ExportMapper.toFeedbackExport);
+
+    {
+      exportedAt = now;
+      principal = caller;
+      hasProfile = hasProfile;
+      profile = profile;
+      listings = listingCards;
+      trades = tradeViews;
+      messages = msgExports;
+      savedSearches = searches;
+      favoriteListingIds = favIds;
+      feedback = feedbackRows;
+    }
+  };
+
+  /// Anonymizes profile PII, clears payment methods, deactivates active listings.
+  /// Blocks when open trades exist (not complete/refunded/cancelled).
+  public func deleteMyAccount(
+    users         : Map.Map<Types.UserId, Types.User>,
+    listings      : Map.Map<Types.ListingId, Types.Listing>,
+    trades        : Map.Map<Types.TradeId, Types.Trade>,
+    savedSearches : Map.Map<Types.UserId, List.List<Types.SavedSearch>>,
+    favorites     : Map.Map<Types.UserId, Set.Set<Types.ListingId>>,
+    notifications : Map.Map<Types.UserId, List.List<Types.NotificationEvent>>,
+    caller        : Types.UserId,
+    confirmation  : Text,
+  ) : Types.Result<()> {
+    if (confirmation != DELETE_CONFIRMATION) {
+      return #err(#invalid_input("Type DELETE to confirm account closure"));
+    };
+
+    let user = switch (users.get(caller)) {
+      case (?u) u;
+      case null return #err(#not_found);
+    };
+
+    switch (user.accountClosedAt) {
+      case (?_) return #err(#invalid_input("Account is already closed"));
+      case null {};
+    };
+
+    for (t in trades.values()) {
+      if (isTradeParticipant(t, caller) and isBlockingTradeStatus(t.status)) {
+        return #err(#invalid_input("Complete or cancel open trades before closing your account"));
+      };
+    };
+
+    let now = Types.now();
+    user.username := deletedUsername(caller);
+    user.bio := "";
+    user.avatarUrl := "";
+    user.paymentMethods := [];
+    user.accountClosedAt := ?now;
+
+    for (l in listings.values()) {
+      if (Principal.equal(l.seller, caller) and l.status == #active) {
+        l.status := #inactive;
+        l.resolvedAt := ?now;
+      };
+    };
+
+    savedSearches.remove(caller);
+    favorites.remove(caller);
+    notifications.remove(caller);
+
+    #ok(())
   };
 }

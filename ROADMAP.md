@@ -8,7 +8,7 @@
 
 ## Phase 1 — MVP Core (Months 1–3)
 
-**Goal:** A functional P2P marketplace where users can create listings, initiate atomic swaps with manual escrow confirmation, pay in stablecoins, use decentralized identity login, track shipments via Nova Poshta, and resolve basic disputes through manual moderation.
+**Goal:** A functional P2P marketplace where users can create listings, initiate platform-coordinated trades, pay in stablecoins, use Internet Identity login, track shipments via Nova Poshta, and resolve basic disputes through manual moderation.
 
 ### Backend Module Milestones
 
@@ -32,14 +32,14 @@
 - [ ] Input validation at module boundary (title, description, price, payment methods)
 - [ ] Anonymous principal blocking
 
-#### Atomic Swap / Escrow Module
-- [ ] `initiateSwap(listingId, paymentMethod)` — on-chain token approval and escrow lock
-- [ ] `completeSwap(swapId, preimage)` — hash verification → token release to seller
-- [ ] `refundSwap(swapId)` — timelock expiry check → token return to buyer
-- [ ] `cancelSwap(swapId)` — pre-funding only, by either party
-- [ ] `confirmPayment(swapId)` — manual seller confirmation for off-chain stablecoins
+#### Trade Coordination / Escrow Module
+- [ ] `initiateTrade(listingId, paymentMethod)` — creates a platform-coordinated trade and PaymentIntent when rules allow
+- [ ] `confirmPaymentSent(tradeId)` — buyer marks stablecoin payment sent
+- [ ] `confirmPaymentReceived(tradeId)` — seller receipt signal after explorer verification
+- [ ] `refundTrade(tradeId)` — deadline/rule check → terminal refund state
+- [ ] `cancelTrade(tradeId)` — pre-funding only, by eligible party
 - [ ] Dual-role reputation update after completion
-- [ ] Persistent swap state machine
+- [ ] Persistent trade state machine
 - [ ] Anonymous principal blocking
 
 #### Messaging Module
@@ -47,11 +47,11 @@
 - [ ] `getMessages(threadId, limit, cursor)` — paginated, access-controlled
 - [ ] `getUnreadCount(principal)` — query across all threads
 - [ ] `markRead(threadId)` — resets unread count for caller
-- [ ] Thread auto-created on swap initiation
+- [ ] Thread auto-created on trade initiation
 - [ ] Access control: only trade participants per thread
 
 #### Disputes Module
-- [ ] `openDispute(swapId, reason, evidenceUrls)` — buyer or seller
+- [ ] `openDispute(tradeId, reason, evidenceUrls)` — buyer or seller
 - [ ] `resolveDispute(disputeId, winner)` — moderator role required
 - [ ] `getDispute(disputeId)` — trade participants + moderators
 - [ ] Dispute status state machine: `Open → UnderReview → Resolved`
@@ -128,10 +128,10 @@
 - [ ] Verification result triggers automatic escrow progression
 - [ ] API credentials stored in secure backend storage (never frontend)
 
-#### Atomic Swap / Escrow — On-Chain Escrow
-- [ ] Full on-chain escrow for native stablecoins using on-chain token protocol
+#### On-Chain Escrow — Gate C
+- [ ] ICRC/ck-token escrow behind owner-approved Gate C
 - [ ] Token approval and escrow lock confirmed by on-chain ledger
-- [ ] Automated swap completion triggered by payment verification
+- [ ] Automated trade progression triggered by verified lock/release events
 - [ ] Fee distribution: 97% seller / 2% platform / 0.5% oracle / 0.5% reserve
 
 #### Disputes — Juror Pool (Phase 2)
@@ -332,13 +332,13 @@ The following items were scoped but deferred to a future workstream or Phase 3:
 
 | Item | Reason deferred |
 |---|---|
-| HTLC atomic swap — trustless cross-chain escrow | Phase 3; requires threshold ECDSA + ICRC-1 maturity |
-| WalletConnect v2 — multi-wallet support | Phase 3; Internet Identity is the only auth method in MVP |
+| Cross-chain lock-release research | Future ADR only; rejected for MVP goods marketplace |
+| External wallet signed-nonce proof — multi-wallet support | Phase 1.5; Internet Identity remains the only auth method, and no specific wallet SDK is committed without ADR + owner approval |
 | International shipping carriers — DHL, UPS, FedEx | Post-MVP; current coverage is Ukraine-only (Nova Poshta, Ukrposhta, Meest) |
-| Full on-chain escrow — ICRC-1 standard + threshold ECDSA | Phase 3 |
+| Full on-chain escrow — ICRC/ck-token Gate C path | Phase 3, owner-approved only |
 | DAO governance — treasury management, proposal voting | Phase 3 stub only |
 | KYC/AML module — modular compliance layer | Post-MVP; modular design allows addition without breaking changes |
-| EVM full address derivation — Keccak-256 | Phase 3; currently uses simplified deterministic derivation (last 20 bytes of compressed pubkey, hex-encoded) |
+| External wallet address verification adapter | Design-gated; no current EVM key-derivation dependency |
 
 ---
 

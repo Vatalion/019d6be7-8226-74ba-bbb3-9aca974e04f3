@@ -61,9 +61,11 @@ export function filtersToListingsSearch(
   return search;
 }
 
-export function listingsSearchFromUrl(
-  sp: URLSearchParams,
-): { filters: FilterState; sort: SortKey; query: string } {
+export function listingsSearchFromUrl(sp: URLSearchParams): {
+  filters: FilterState;
+  sort: SortKey;
+  query: string;
+} {
   const sortRaw = sp.get("sort");
   const sort: SortKey =
     sortRaw === "price-asc" || sortRaw === "price-desc" ? sortRaw : "newest";
@@ -80,7 +82,9 @@ export function listingsSearchFromUrl(
   const conditions = conditionsRaw
     ? (conditionsRaw
         .split(",")
-        .filter((v) => allConditions.includes(v as ItemCondition)) as ItemCondition[])
+        .filter((v) =>
+          allConditions.includes(v as ItemCondition),
+        ) as ItemCondition[])
     : [];
 
   const shippingRaw = sp.get("shipping");
@@ -90,9 +94,7 @@ export function listingsSearchFromUrl(
 
   const tokenRaw = sp.get("token");
   const token =
-    tokenRaw && APPROVED_TOKENS.has(tokenRaw)
-      ? (tokenRaw as TradeToken)
-      : null;
+    tokenRaw && APPROVED_TOKENS.has(tokenRaw) ? (tokenRaw as TradeToken) : null;
 
   return {
     filters: {
@@ -108,9 +110,11 @@ export function listingsSearchFromUrl(
   };
 }
 
-export function listingsSearchFromRoute(
-  search: ListingsSearch,
-): { filters: FilterState; sort: SortKey; query: string } {
+export function listingsSearchFromRoute(search: ListingsSearch): {
+  filters: FilterState;
+  sort: SortKey;
+  query: string;
+} {
   const sp = new URLSearchParams();
   if (search.q) sp.set("q", search.q);
   if (search.sort) sp.set("sort", search.sort);

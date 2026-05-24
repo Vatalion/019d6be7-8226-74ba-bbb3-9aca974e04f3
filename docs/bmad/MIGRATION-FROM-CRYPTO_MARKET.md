@@ -16,13 +16,13 @@ We **did not** copy the old repo wholesale. We extracted product intent and BMAD
 
 | Old location | Kept as |
 |--------------|---------|
-| `docs/project-brief.md` | Problem/decentralization framing → `product-brief.md` |
-| `docs/prd/1-executive-summary.md`, `2a-problem-statement-and-goals.md` | Vision phrasing → `prd.md` §1–2 |
-| `docs/prd/6-progressive-decentralization-strategy.md` | Phasing model → `prd.md` §6 (rewritten) |
-| `docs/prd/4-functional-requirements.md` | FR themes (listings, escrow, disputes, messaging) → `prd.md` §4 (filtered) |
-| `_bmad-output/planning-artifacts/architecture.md` | Liability, dual reputation, jury → `architecture.md` § domain (where implemented) |
-| `_bmad-output/planning-artifacts/epics.md` | Epic numbering inspiration → `epics.md` (reset status) |
-| `docs/prd/3-personas-and-journeys.md` | Personas → `prd.md` §3 (journeys rewritten for goods) |
+| old repo: docs/project-brief.md | Problem/decentralization framing → `product-brief.md` |
+| old repo `docs/prd/1-executive-summary.md`, `2a-problem-statement-and-goals.md` | Vision phrasing → `prd.md` §1–2 |
+| old repo: docs/prd/6-progressive-decentralization-strategy.md | Phasing model → `prd.md` §6 (rewritten) |
+| old repo: docs/prd/4-functional-requirements.md | FR themes (listings, escrow, disputes, messaging) → `prd.md` §4 (filtered) |
+| old repo `_bmad-output/planning-artifacts/architecture.md` | Liability, dual reputation, jury → `architecture.md` § domain (where implemented) |
+| old repo `_bmad-output/planning-artifacts/epics.md` | Epic numbering inspiration → `epics.md` (reset status) |
+| old repo: docs/prd/3-personas-and-journeys.md | Personas → `prd.md` §3 (journeys rewritten for goods) |
 | `DESIGN.md` (current repo) | Linked from `ux-design-spec.md` |
 
 ## Excluded (do not port)
@@ -52,6 +52,16 @@ We **did not** copy the old repo wholesale. We extracted product intent and BMAD
 | Trust model | Atomic swap | **Progressive:** platform-coordinated → trustless custody |
 | Client | Flutter mobile | Responsive **web** (Caffeine frontend canister) |
 
+## User stories (2026-05-21)
+
+Legacy `docs/stories/*.md` were **not copied verbatim**. See:
+
+- [`_bmad-output/implementation-artifacts/stories/index.md`](../../_bmad-output/implementation-artifacts/stories/index.md) — canonical BMAD stories
+- this document's **Excluded (do not port)** table — rejected legacy material
+- `node scripts/build-bmad-stories.mjs` — regenerates full BMAD stories
+
+Each ported story includes **adaptation notes** (React/Motoko monolith, II-only, Phase 1 manual payment). HTLC stories map to **E9 Phase 3**, not current trade flow.
+
 ## Where old files remain
 
-The legacy repo is unchanged. Use it as **reference only**. Canonical docs for active development live in **this** repo under `_bmad-output/planning-artifacts/`.
+The legacy repo is unchanged. Use it as **reference only**. Canonical docs for active development live in **this** repo under `_bmad-output/planning-artifacts/` and `_bmad-output/implementation-artifacts/stories/`.

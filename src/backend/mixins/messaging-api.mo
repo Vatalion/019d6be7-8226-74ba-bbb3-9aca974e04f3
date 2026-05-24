@@ -7,6 +7,7 @@ import Types "../types";
 import MessagingLib "../lib/Messaging";
 import Auth "../lib/Auth";
 import RateLimiter "../lib/RateLimiter";
+import Notifications "../lib/Notifications";
 
 /// Messaging mixin — exposes public P2P chat endpoints to the actor.
 mixin (
@@ -22,49 +23,31 @@ mixin (
   linkPreviewCache : Map.Map<Text, Types.LinkPreview>,
 ) {
 
-  /// Maximum notifications stored per user (FIFO eviction).
-  let MAX_NOTIFICATIONS : Nat = 100;
-
-  /// Link preview cache TTL: 24 hours in nanoseconds.
-  let LINK_PREVIEW_TTL_NS : Int = 86_400_000_000_000;
-
-  /// Maximum URL length accepted for link preview.
-  let MAX_URL_LENGTH : Nat = 2048;
+  func evictOneLinkPreviewCacheEntry(now : Types.Timestamp) {
+    var removed = false;
+    for ((cachedUrl, preview) in linkPreviewCache.entries()) {
+      if (not removed and now - preview.fetchedAt >= MessagingLib.LINK_PREVIEW_TTL_NS) {
+        linkPreviewCache.remove(cachedUrl);
+        removed := true;
+      };
+    };
+    if (not removed) {
+      label first for ((cachedUrl, _) in linkPreviewCache.entries()) {
+        linkPreviewCache.remove(cachedUrl);
+        break first;
+      };
+    };
+  };
 
   // ─── Internal notification helper ─────────────────────────────────────────
 
-  /// Adds a notification for the given principal. Evicts oldest if over cap.
   func _addNotification(
     principal : Principal,
     eventType : Text,
     tradeId   : Nat,
     msg       : Text,
   ) {
-    let id = nextNotificationId.value;
-    nextNotificationId.value := id + 1;
-    let event : Types.NotificationEvent = {
-      id        = id;
-      eventType = eventType;
-      tradeId   = tradeId;
-      message   = msg;
-      timestamp = Time.now();
-      read      = false;
-    };
-    let existing = switch (notifications.get(principal)) {
-      case (?list) list;
-      case null    List.empty<Types.NotificationEvent>();
-    };
-    if (existing.size() >= MAX_NOTIFICATIONS) {
-      let arr = existing.toArray();
-      existing.clear();
-      var i = 0;
-      for (item in arr.values()) {
-        if (i > 0) { existing.add(item) };
-        i := i + 1;
-      };
-    };
-    existing.add(event);
-    notifications.add(principal, existing);
+    Notifications.add(notifications, nextNotificationId, principal, eventType, tradeId, msg);
   };
 
   // ─── Send ──────────────────────────────────────────────────────────────────
@@ -270,11 +253,12 @@ mixin (
 
   /// Fetches OpenGraph metadata for a URL via HTTPS outcall.
   /// Results are cached 24 h per URL.
-  /// Security: only http:// and https:// schemes allowed; max URL length 2048.
+  /// Security: only http:// and https:// schemes allowed; max URL length 2048;
+  /// private/metadata hosts are blocklisted before outcall (SSRF guard).
   /// No caller auth required — intentionally public.
   public shared func getLinkPreview(url : Text) : async Types.Result<Types.LinkPreview> {
     // ── Security validation ───────────────────────────────────────────────
-    if (url.size() > MAX_URL_LENGTH) {
+    if (url.size() > MessagingLib.MAX_URL_LENGTH) {
       return #err(#invalid_input("URL exceeds maximum length of 2048 characters"));
     };
     let urlLower = url.toLower();
@@ -283,12 +267,15 @@ mixin (
     if (not isHttp and not isHttps) {
       return #err(#invalid_input("URL must start with http:// or https://"));
     };
+    if (MessagingLib.isBlockedPreviewHost(url)) {
+      return #err(#invalid_input("URL host is not allowed for link preview"));
+    };
 
     // ── Cache check ───────────────────────────────────────────────────────
-    let now = Time.now();
+    let now = Types.now();
     switch (linkPreviewCache.get(url)) {
       case (?cached) {
-        if (now - cached.fetchedAt < LINK_PREVIEW_TTL_NS) {
+        if (now - cached.fetchedAt < MessagingLib.LINK_PREVIEW_TTL_NS) {
           return #ok(cached);
         };
       };
@@ -360,6 +347,9 @@ mixin (
       };
     };
 
+    if (linkPreviewCache.size() >= MessagingLib.MAX_LINK_PREVIEW_CACHE_ENTRIES) {
+      evictOneLinkPreviewCacheEntry(now);
+    };
     linkPreviewCache.add(url, preview);
     #ok(preview)
   };

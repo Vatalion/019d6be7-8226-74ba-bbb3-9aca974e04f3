@@ -28,7 +28,12 @@ func seedListing(listings : Map.Map<Types.ListingId, Types.Listing>, id : Nat) {
     "Phone", "Good phone for sale", #electronics, null,
     2_000_000, #USDT_TRC20, #good, [], "Kyiv", [],
     false, null, null, null, null, null, null, null,
+    [],
   );
+  switch (listings.get(id)) {
+    case (?l) { l.status := #active };
+    case null {};
+  };
 };
 
 suite("Engagement — favorites", func() {
@@ -51,6 +56,7 @@ suite("Engagement — saved searches", func() {
     switch (Engagement.saveSearch(store, 1, buyer, "Kyiv phones", "{\"q\":\"phone\"}")) {
       case (#ok(s)) {
         expect.text(s.name).equal("Kyiv phones");
+        expect.bool(s.alertsEnabled).equal(false);
         let all = Engagement.getSavedSearches(store, buyer);
         expect.nat(all.size()).equal(1);
         switch (Engagement.deleteSavedSearch(store, buyer, s.id)) {
@@ -61,6 +67,89 @@ suite("Engagement — saved searches", func() {
         };
       };
       case (#err(_)) assert false;
+    };
+  });
+
+  test("toggle alerts on saved search", func() {
+    let store = Map.empty<Types.UserId, List.List<Types.SavedSearch>>();
+    ignore Engagement.saveSearch(store, 1, buyer, "Phones", "{\"q\":\"phone\"}");
+    switch (Engagement.setSavedSearchAlerts(store, buyer, 1, true)) {
+      case (#ok(())) {
+        let searches = Engagement.getSavedSearches(store, buyer);
+        expect.bool(searches[0].alertsEnabled).equal(true);
+      };
+      case (#err(_)) assert false;
+    };
+    switch (Engagement.setSavedSearchAlerts(store, buyer, 1, false)) {
+      case (#ok(())) {
+        let searches = Engagement.getSavedSearches(store, buyer);
+        expect.bool(searches[0].alertsEnabled).equal(false);
+      };
+      case (#err(_)) assert false;
+    };
+  });
+
+  test("listing matches saved search params", func() {
+    let listings = makeListings();
+    seedListing(listings, 1);
+    switch (listings.get(1)) {
+      case (?l) {
+        expect.bool(
+          Engagement.listingMatchesSavedSearch(l, "{\"q\":\"Phone\"}")
+        ).equal(true);
+        expect.bool(
+          Engagement.listingMatchesSavedSearch(l, "{\"q\":\"laptop\"}")
+        ).equal(false);
+      };
+      case null assert false;
+    };
+  });
+
+  test("alert notification when enabled and listing matches", func() {
+    let listings = makeListings();
+    seedListing(listings, 1);
+    let store = Map.empty<Types.UserId, List.List<Types.SavedSearch>>();
+    ignore Engagement.saveSearch(store, 1, buyer, "Phones", "{\"q\":\"phone\"}");
+    ignore Engagement.setSavedSearchAlerts(store, buyer, 1, true);
+    let notifications = Map.empty<Principal, List.List<Types.NotificationEvent>>();
+    let nextNotificationId = { var value = 0 };
+    switch (listings.get(1)) {
+      case (?listing) {
+        Engagement.notifyMatchingSavedSearchAlerts(
+          store, notifications, nextNotificationId, listing,
+        );
+      };
+      case null assert false;
+    };
+    switch (notifications.get(buyer)) {
+      case (?events) {
+        expect.nat(events.size()).equal(1);
+        let event = events.toArray()[0];
+        expect.text(event.eventType).equal("saved_search_match");
+        expect.nat(event.tradeId).equal(1);
+      };
+      case null assert false;
+    };
+  });
+
+  test("no alert when alerts disabled", func() {
+    let listings = makeListings();
+    seedListing(listings, 1);
+    let store = Map.empty<Types.UserId, List.List<Types.SavedSearch>>();
+    ignore Engagement.saveSearch(store, 1, buyer, "Phones", "{\"q\":\"phone\"}");
+    let notifications = Map.empty<Principal, List.List<Types.NotificationEvent>>();
+    let nextNotificationId = { var value = 0 };
+    switch (listings.get(1)) {
+      case (?listing) {
+        Engagement.notifyMatchingSavedSearchAlerts(
+          store, notifications, nextNotificationId, listing,
+        );
+      };
+      case null assert false;
+    };
+    switch (notifications.get(buyer)) {
+      case null {};
+      case (?_) assert false;
     };
   });
 });
@@ -113,7 +202,7 @@ suite("Engagement — bump and promote", func() {
   test("owner can bump once per day", func() {
     let listings = makeListings();
     seedListing(listings, 1);
-    let now = Time.now();
+    let now = Types.now();
     switch (Engagement.bumpListing(listings, seller, 1, now)) {
       case (#ok(())) {};
       case (#err(_)) assert false;
@@ -127,7 +216,7 @@ suite("Engagement — bump and promote", func() {
   test("promote marks listing promoted", func() {
     let listings = makeListings();
     seedListing(listings, 1);
-    let now = Time.now();
+    let now = Types.now();
     ignore Engagement.promoteListing(listings, 1, now, Engagement.defaultPromoteDurationNs());
     switch (listings.get(1)) {
       case (?l) {

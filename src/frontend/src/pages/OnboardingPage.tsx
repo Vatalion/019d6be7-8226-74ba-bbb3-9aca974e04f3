@@ -76,6 +76,18 @@ export default function OnboardingPage() {
     if (usernameError) setUsernameError(null);
   };
 
+  const mapAvatarUploadError = (rawMsg: string): string => {
+    if (
+      rawMsg.includes("403 Forbidden: Invalid payload") ||
+      rawMsg.includes("Invalid payload") ||
+      rawMsg.includes("403 Forbidden") ||
+      rawMsg.includes("403")
+    ) {
+      return t("upload.error403Auth");
+    }
+    return rawMsg;
+  };
+
   const handleAvatarSelect = async (file: File) => {
     if (!identity || identity.getPrincipal().isAnonymous()) {
       setAvatarError(t("onboarding.error.notAuthenticated"));
@@ -100,7 +112,9 @@ export default function OnboardingPage() {
       setAvatarUrl(url);
       toast.success(t("onboarding.avatar.uploaded"));
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = mapAvatarUploadError(
+        err instanceof Error ? err.message : String(err),
+      );
       setAvatarError(msg);
       setAvatarPreview(null);
       toast.error(t("onboarding.avatar.uploadFailed"), { description: msg });

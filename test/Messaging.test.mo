@@ -27,16 +27,26 @@ let makeTrade = func(
     amount            = 1_000_000;
     token             = #USDT_TRC20;
     var status        = #pending;
-    createdAt         = Time.now();
+    createdAt         = Types.now();
     var fundedAt      = null;
     var confirmedAt   = null;
     var completedAt   = null;
     var refundDeadline = null;
+    var sellerResponseDeadline = null;
     var escrowAccount = null;
     var shippingSelection = null;
     var ttnNumber         = null;
     var ttnCreationStatus = #Pending;
     var digitalDelivery   = null;
+    var deliveryRecordAt  = null;
+    var payoutWalletSnapshot = null;
+    var payoutWalletHeld     = false;
+    var paymentIntent        = null;
+    var shipByDeadline       = null;
+    var shippedAt            = null;
+    var npDeliveredAt        = null;
+    var npDeliveredGraceEndsAt = null;
+    var pendingOnChainSettlement = null;
   }
 };
 
@@ -47,14 +57,19 @@ let makeUser = func(id : Text) : Types.User {
     var bio = "";
     var avatarUrl = "";
     var role = #user;
-    createdAt = Time.now();
+    createdAt = Types.now();
     var reputationScore = 10;
+    var buyerScore           = 0;
+    var sellerScore          = 0;
     var trustLevel = #new_;
+    var kycTier = #none;
     var isBanned = false;
     var suspendedUntil = null;
     var liabilityBalance = 0;
     var liabilityHistory = [];
     var paymentMethods = [];
+    var linkedWallets = [];
+    var accountClosedAt = null;
   }
 };
 
@@ -203,5 +218,37 @@ suite("Messaging — getUnreadCount", func() {
 
     let count = Messaging.getUnreadCount(messages, tradeIndex, trades, lastRead, bob, 1);
     expect.nat(count).equal(0);
+  });
+});
+
+suite("Messaging — isBlockedPreviewHost", func() {
+  test("blocks localhost and loopback", func() {
+    expect.bool(Messaging.isBlockedPreviewHost("http://localhost/path")).isTrue();
+    expect.bool(Messaging.isBlockedPreviewHost("https://127.0.0.1/admin")).isTrue();
+    expect.bool(Messaging.isBlockedPreviewHost("http://[::1]:8080/")).isTrue();
+  });
+
+  test("blocks cloud metadata endpoints", func() {
+    expect.bool(Messaging.isBlockedPreviewHost("http://169.254.169.254/latest/meta-data")).isTrue();
+    expect.bool(Messaging.isBlockedPreviewHost("http://metadata.google.internal/computeMetadata/v1/")).isTrue();
+  });
+
+  test("blocks private IPv4 ranges", func() {
+    expect.bool(Messaging.isBlockedPreviewHost("https://10.0.0.1/internal")).isTrue();
+    expect.bool(Messaging.isBlockedPreviewHost("https://172.16.5.4/internal")).isTrue();
+    expect.bool(Messaging.isBlockedPreviewHost("https://192.168.1.50/internal")).isTrue();
+    expect.bool(Messaging.isBlockedPreviewHost("https://169.254.10.2/link-local")).isTrue();
+  });
+
+  test("allows public hosts", func() {
+    expect.bool(Messaging.isBlockedPreviewHost("https://example.com/page")).isFalse();
+    expect.bool(Messaging.isBlockedPreviewHost("https://cdn.example.org/img.png")).isFalse();
+  });
+
+  test("extractPreviewHost strips scheme, path, and port", func() {
+    switch (Messaging.extractPreviewHost("HTTPS://Example.COM:8443/foo?x=1")) {
+      case (?host) expect.text(host).equal("example.com");
+      case null assert false;
+    };
   });
 });

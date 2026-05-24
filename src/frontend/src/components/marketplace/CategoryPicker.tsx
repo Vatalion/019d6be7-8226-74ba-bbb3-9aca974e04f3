@@ -82,9 +82,7 @@ export function CategoryPicker({
       {l2List.length > 0 && (
         <div className="space-y-2">
           <Select
-            value={
-              selected?.parentId != null ? String(selected.id) : "any-l2"
-            }
+            value={selected?.parentId != null ? String(selected.id) : "any-l2"}
             onValueChange={(v) => {
               if (v === "any-l2" && l1Id != null) {
                 onChange(l1Id, getCategoryById(l1Id) ?? null);

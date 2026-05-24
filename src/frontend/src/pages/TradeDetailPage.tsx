@@ -1,16 +1,38 @@
 import { ShippingCarrier, TradeStatus, type TradeToken } from "@/backend.d";
 import type {
-  DigitalDelivery,
+  DigitalDeliveryView,
   DisputeView,
   ListingCard,
   TradeView,
 } from "@/backend.d";
-import { DisputeStatus, ResolutionOutcome } from "@/backend.d";
+import {
+  DisputeStatus,
+  PaymentSettlementPath,
+  ResolutionOutcome,
+} from "@/backend.d";
 import PaymentVerificationWidget from "@/components/shared/PaymentVerificationWidget";
+import { BuyerProtectionBadge } from "@/components/trade/BuyerProtectionBadge";
 import { ChatPanel } from "@/components/trade/ChatPanel";
 import { DisputeModal } from "@/components/trade/DisputeModal";
 import { EscrowTimeline } from "@/components/trade/EscrowTimeline";
+import {
+  ManualPaymentNotice,
+  OnChainEscrowPanel,
+  OnChainReleaseHint,
+} from "@/components/trade/OnChainEscrowPanel";
+import { SellerFaultSettlementPanel } from "@/components/trade/SellerFaultSettlementPanel";
 import { ShippingTracker } from "@/components/trade/ShippingTracker";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +42,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useBackend } from "@/hooks/useBackend";
 import { useLocale } from "@/hooks/useLocale";
 import { useVisiblePolling } from "@/hooks/useVisiblePolling";
+import { lockOnChainTrade } from "@/lib/initiateListingTrade";
+import { isErc20ManualToken, isOnChainToken } from "@/lib/onChainTokens";
+import { formatTokenAmountLabel } from "@/lib/tradeFeeQuote";
 import { handleResultError } from "@/utils/errorHandler";
 import { useInternetIdentity } from "@caffeineai/core-infrastructure";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -46,9 +71,31 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 function formatAmount(amount: bigint, token: TradeToken): string {
-  const n = Number(amount) / 1e8;
-  return `${n.toFixed(n < 0.01 ? 6 : 4)} ${token}`;
+  return formatTokenAmountLabel(amount, token, token.replace(/_/g, " "));
 }
+
+function lockedAmountForBuyerCancel(trade: TradeView): bigint {
+  if (trade.paymentIntent?.exactAmount != null) {
+    return trade.paymentIntent.exactAmount;
+  }
+  if (trade.escrowAccount?.amount != null) {
+    return trade.escrowAccount.amount;
+  }
+  return trade.amount;
+}
+
+function computeBuyerCancelSplitPreview(lockedAmount: bigint) {
+  const buyer = (lockedAmount * 8500n) / 10000n;
+  const seller = (lockedAmount * 1000n) / 10000n;
+  const platform = lockedAmount - buyer - seller;
+  return { buyer, seller, platform, lockedAmount };
+}
+
+const BUYER_CANCEL_STATUSES: TradeStatus[] = [
+  TradeStatus.payment_verified,
+  TradeStatus.fulfillment_pending,
+  TradeStatus.funded,
+];
 
 function truncatePrincipal(p: string): string {
   if (p.length <= 16) return p;
@@ -58,6 +105,26 @@ function truncatePrincipal(p: string): string {
 function StatusBadge({ status }: { status: TradeStatus }) {
   const { t: tl } = useLocale();
   const map: Record<TradeStatus, { labelKey: string; cls: string }> = {
+    awaiting_seller_handshake: {
+      labelKey: "trade.status.awaiting_seller_handshake",
+      cls: "status-badge-pending",
+    },
+    payment_intent: {
+      labelKey: "trade.status.payment_intent",
+      cls: "status-badge-funded",
+    },
+    manual_payment_pending: {
+      labelKey: "trade.status.manual_payment_pending",
+      cls: "status-badge-pending",
+    },
+    payment_intent_expired: {
+      labelKey: "trade.status.payment_intent_expired",
+      cls: "inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-destructive/15 text-destructive",
+    },
+    cancelled_no_seller_response: {
+      labelKey: "trade.status.cancelled_no_seller_response",
+      cls: "status-badge-pending",
+    },
     pending: {
       labelKey: "trade.status.pending",
       cls: "status-badge-pending",
@@ -75,6 +142,22 @@ function StatusBadge({ status }: { status: TradeStatus }) {
       labelKey: "trade.status.payment_verified",
       cls: "inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-green-500/25 text-green-700 dark:text-green-200",
     },
+    digital_delivered: {
+      labelKey: "trade.status.digital_delivered",
+      cls: "inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-blue-500/25 text-blue-700 dark:text-blue-200",
+    },
+    fulfillment_pending: {
+      labelKey: "trade.status.fulfillment_pending",
+      cls: "status-badge-pending",
+    },
+    shipped: {
+      labelKey: "trade.status.shipped",
+      cls: "status-badge-funded",
+    },
+    awaiting_receipt: {
+      labelKey: "trade.status.awaiting_receipt",
+      cls: "status-badge-confirmed",
+    },
     complete: {
       labelKey: "trade.status.complete",
       cls: "status-badge-confirmed",
@@ -87,8 +170,20 @@ function StatusBadge({ status }: { status: TradeStatus }) {
       labelKey: "trade.status.disputed",
       cls: "status-badge-dispute",
     },
+    dispute_l1: {
+      labelKey: "trade.status.disputed",
+      cls: "status-badge-dispute",
+    },
+    dispute_l2: {
+      labelKey: "trade.status.disputed",
+      cls: "status-badge-dispute",
+    },
     cancelled: {
       labelKey: "trade.status.cancelled",
+      cls: "status-badge-pending",
+    },
+    cancelled_buyer_pre_ship: {
+      labelKey: "trade.status.cancelled_buyer_pre_ship",
       cls: "status-badge-pending",
     },
   };
@@ -220,6 +315,65 @@ function NetworkInstructionPanel({ token }: { token: TradeToken }) {
   );
 }
 
+function Erc20GasWarning({ token }: { token: TradeToken }) {
+  const { t: tl } = useLocale();
+  if (!isErc20ManualToken(token)) return null;
+
+  return (
+    <div
+      className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 space-y-1"
+      data-ocid="erc20-gas-warning"
+    >
+      <div className="flex items-start gap-2 text-amber-800 dark:text-amber-200">
+        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+        <p className="text-sm font-medium">
+          {tl("trade.paymentIntent.gasWarning")}
+        </p>
+      </div>
+      <p className="text-xs text-muted-foreground pl-6">
+        {tl("trade.paymentIntent.coordinatedNote")}
+      </p>
+    </div>
+  );
+}
+
+function ManualPaymentPathPanel({
+  trade,
+  gateOn,
+  onCreateManual,
+}: {
+  trade: TradeView;
+  gateOn: boolean;
+  onCreateManual: () => void;
+}) {
+  const { t: tl } = useLocale();
+  const token = trade.token as TradeToken;
+
+  return (
+    <div
+      className="rounded-lg border border-border bg-card p-4 space-y-3"
+      data-ocid="manual-payment-path-panel"
+    >
+      <p className="text-sm font-medium">
+        {tl("trade.paymentPath.manualTitle")}
+      </p>
+      {isErc20ManualToken(token) && <Erc20GasWarning token={token} />}
+      {gateOn && (
+        <p className="text-xs text-muted-foreground">
+          {tl("trade.paymentPath.mutuallyExclusive")}
+        </p>
+      )}
+      <Button
+        className="w-full gap-2"
+        onClick={onCreateManual}
+        data-ocid="btn-create-payment-intent"
+      >
+        {tl("trade.action.createPaymentIntent")}
+      </Button>
+    </div>
+  );
+}
+
 // ─── Seller Reminder Panel ────────────────────────────────────────────────────
 
 function SellerReminderPanel({
@@ -259,6 +413,65 @@ function SellerReminderPanel({
   );
 }
 
+function SellerPaymentAddressPanel({
+  tradeId,
+}: {
+  tradeId: bigint;
+}) {
+  const { actor, isFetching } = useBackend();
+  const { t: tl } = useLocale();
+
+  const { data: methods = [] } = useQuery({
+    queryKey: ["sellerPaymentMethods", tradeId.toString()],
+    queryFn: () => actor!.getSellerPaymentMethodsForTrade(tradeId),
+    enabled: !!actor && !isFetching,
+    staleTime: 30_000,
+  });
+
+  if (!methods.length) {
+    return (
+      <div
+        className="rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground"
+        data-ocid="seller-payment-empty"
+      >
+        {tl("trade.sellerPayment.empty")}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2" data-ocid="seller-payment-addresses">
+      <p className="text-sm font-semibold text-foreground">
+        {tl("trade.sellerPayment.title")}
+      </p>
+      {methods.map((pm) => (
+        <div
+          key={`${pm.token}-${pm.address}`}
+          className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/30 p-2"
+        >
+          <code className="text-xs break-all text-foreground">
+            {pm.address}
+          </code>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            data-ocid="copy-seller-payment-address"
+            onClick={async () => {
+              await navigator.clipboard.writeText(pm.address);
+              toast.success(tl("trade.sellerPayment.copied"));
+            }}
+          >
+            <Copy className="h-3.5 w-3.5 mr-1" />
+            {tl("trade.sellerPayment.copy")}
+          </Button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function PaymentPhaseNotice() {
   const { t: tl } = useLocale();
   return (
@@ -294,27 +507,49 @@ function PaymentPhaseNotice() {
 }
 
 const PAYMENT_PHASE_STATUSES: TradeStatus[] = [
+  TradeStatus.payment_intent,
+  TradeStatus.manual_payment_pending,
   TradeStatus.pending,
   TradeStatus.funded,
   TradeStatus.buyer_confirmed,
   TradeStatus.payment_verified,
 ];
 
+function formatDeadline(ts?: bigint): string | undefined {
+  if (ts == null) return undefined;
+  return new Date(Number(ts) / 1_000_000).toLocaleString();
+}
+
 function TradeActions({
   trade,
   isBuyer,
+  isSeller,
+  isPhysicalTrade,
   onDisputeOpen,
 }: {
   trade: TradeView;
   isBuyer: boolean;
+  isSeller: boolean;
+  isPhysicalTrade: boolean;
   onDisputeOpen: () => void;
 }) {
   const { actor, isFetching: actorFetching } = useBackend();
   const qc = useQueryClient();
   const { t: tl } = useLocale();
   const { isVisible } = useVisiblePolling();
+  const { identity } = useInternetIdentity();
 
   const navigate = useNavigate();
+
+  const { data: platformFlags } = useQuery({
+    queryKey: ["platformFlags"],
+    queryFn: async () => {
+      if (!actor) throw new Error("No actor");
+      return actor.getPlatformFlags();
+    },
+    enabled: !!actor && !actorFetching,
+    staleTime: 60_000,
+  });
 
   // Fetch unified tracking info so we can show the delivery confirmation button
   const { data: trackingInfo } = useQuery({
@@ -327,7 +562,7 @@ function TradeActions({
     enabled:
       !!actor &&
       !actorFetching &&
-      !isBuyer &&
+      isSeller &&
       (trade.status === TradeStatus.payment_verified ||
         trade.status === TradeStatus.buyer_confirmed ||
         trade.status === TradeStatus.funded),
@@ -360,63 +595,292 @@ function TradeActions({
   }
 
   const s = trade.status;
+  const isCkToken = isOnChainToken(trade.token as TradeToken);
+  const gateOn = platformFlags?.trustlessEscrowEnabled ?? false;
+  const onChain = isCkToken && (gateOn || trade.escrowAccount != null);
+  const ckIntentReady =
+    trade.paymentIntent != null &&
+    trade.paymentIntent.path === PaymentSettlementPath.ck;
   const isTerminal = [
     TradeStatus.complete,
     TradeStatus.refunded,
     TradeStatus.cancelled,
+    TradeStatus.cancelled_no_seller_response,
+    TradeStatus.cancelled_buyer_pre_ship,
   ].includes(s);
+
+  const handshakeDeadline = formatDeadline(trade.sellerResponseDeadline);
 
   if (isTerminal) return null;
 
+  if (!isBuyer && !isSeller) {
+    return (
+      <p
+        className="text-sm text-muted-foreground mt-4"
+        data-ocid="trade-observer-note"
+      >
+        {typeof window !== "undefined" && navigator.language.startsWith("uk")
+          ? "Ви переглядаєте угоду як спостерігач. Дії доступні лише покупцю та продавцю."
+          : "You are viewing this trade as an observer. Only buyer and seller can take actions."}
+      </p>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-3 mt-4" data-ocid="trade-actions">
-      {PAYMENT_PHASE_STATUSES.includes(s) && <PaymentPhaseNotice />}
-
-      {/* Buyer instruction panel: shown for pending/funded states */}
-      {isBuyer && (s === TradeStatus.pending || s === TradeStatus.funded) && (
-        <NetworkInstructionPanel token={trade.token as TradeToken} />
+      {s === TradeStatus.awaiting_seller_handshake && isSeller && (
+        <div
+          className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-3"
+          data-ocid="seller-handshake-panel"
+        >
+          <p className="text-sm text-foreground">
+            {tl("trade.handshake.sellerPrompt")}
+          </p>
+          {handshakeDeadline && (
+            <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5" />
+              {tl("trade.handshake.deadline").replace(
+                "{deadline}",
+                handshakeDeadline,
+              )}
+            </p>
+          )}
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button
+              className="w-full gap-2"
+              onClick={() =>
+                doAction(
+                  () => actor!.confirmSellerHandshake(trade.id),
+                  tl("trade.action.confirmHandshake"),
+                )
+              }
+              data-ocid="btn-confirm-handshake"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              {tl("trade.action.confirmHandshake")}
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full gap-2"
+              onClick={() =>
+                doAction(
+                  () => actor!.declineSellerHandshake(trade.id),
+                  tl("trade.action.declineHandshake"),
+                )
+              }
+              data-ocid="btn-decline-handshake"
+            >
+              <XCircle className="w-4 h-4" />
+              {tl("trade.action.declineHandshake")}
+            </Button>
+          </div>
+        </div>
       )}
 
-      {/* Seller reminder: shown when buyer_confirmed and awaiting seller confirmation */}
-      {!isBuyer && s === TradeStatus.buyer_confirmed && (
+      {s === TradeStatus.awaiting_seller_handshake && isBuyer && (
+        <div
+          className="rounded-lg border border-muted bg-muted/20 p-4 space-y-2"
+          data-ocid="buyer-handshake-waiting"
+        >
+          <p className="text-sm text-foreground">
+            {tl("trade.handshake.buyerWaiting")}
+          </p>
+          {handshakeDeadline && (
+            <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5" />
+              {tl("trade.handshake.deadline").replace(
+                "{deadline}",
+                handshakeDeadline,
+              )}
+            </p>
+          )}
+          <p className="text-xs text-muted-foreground italic">
+            {tl("trade.handshake.noPaymentYet")}
+          </p>
+        </div>
+      )}
+
+      {onChain && <OnChainEscrowPanel trade={trade} isBuyer={isBuyer} />}
+
+      {onChain &&
+        isBuyer &&
+        s === TradeStatus.payment_intent &&
+        !trade.paymentIntent && (
+          <Button
+            className="w-full gap-2"
+            onClick={() =>
+              doAction(
+                () =>
+                  actor!.createPaymentIntent(
+                    trade.id,
+                    1n,
+                    PaymentSettlementPath.ck,
+                  ),
+                tl("trade.onChain.createCkIntent"),
+              )
+            }
+            data-ocid="btn-create-ck-payment-intent"
+          >
+            <ShieldCheck className="w-4 h-4" />
+            {tl("trade.onChain.createCkIntent")}
+          </Button>
+        )}
+
+      {onChain &&
+        isBuyer &&
+        s === TradeStatus.payment_intent &&
+        ckIntentReady &&
+        trade.paymentIntent && (
+          <div className="space-y-2">
+            <Button
+              className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+              onClick={async () => {
+                if (!actor || !identity) {
+                  toast.error(tl("trade.onChain.lockHint"));
+                  return;
+                }
+                const ok = await lockOnChainTrade(
+                  actor,
+                  trade.id,
+                  trade.token as TradeToken,
+                  trade.paymentIntent!.exactAmount,
+                  { navigate, identity },
+                );
+                if (ok) {
+                  toast.success(tl("trade.onChain.lockFunds"));
+                  qc.invalidateQueries({
+                    queryKey: ["trade", trade.id.toString()],
+                  });
+                }
+              }}
+              data-ocid="btn-lock-on-chain-escrow"
+            >
+              <ShieldCheck className="w-4 h-4" />
+              {tl("trade.onChain.lockFunds")}
+            </Button>
+            <p className="text-xs text-muted-foreground text-center px-2">
+              {tl("trade.onChain.lockHint")}
+            </p>
+          </div>
+        )}
+
+      {!onChain && PAYMENT_PHASE_STATUSES.includes(s) && <PaymentPhaseNotice />}
+      {!onChain && PAYMENT_PHASE_STATUSES.includes(s) && (
+        <ManualPaymentNotice />
+      )}
+
+      {!onChain &&
+        isBuyer &&
+        (s === TradeStatus.manual_payment_pending ||
+          s === TradeStatus.pending ||
+          s === TradeStatus.funded) && (
+          <SellerPaymentAddressPanel tradeId={trade.id} />
+        )}
+
+      {!onChain &&
+        isBuyer &&
+        (s === TradeStatus.manual_payment_pending ||
+          s === TradeStatus.pending ||
+          s === TradeStatus.funded) && (
+          <NetworkInstructionPanel token={trade.token as TradeToken} />
+        )}
+
+      {trade.paymentIntent && (
+        <div
+          className="rounded-lg border border-border bg-card p-4 space-y-2"
+          data-ocid="payment-intent-panel"
+        >
+          <p className="text-sm font-medium">
+            {tl("trade.paymentIntent.title")}
+          </p>
+          {isErc20ManualToken(trade.token as TradeToken) &&
+            trade.paymentIntent.path === PaymentSettlementPath.manual && (
+              <p
+                className="text-xs font-medium text-amber-700 dark:text-amber-300"
+                data-ocid="payment-intent-gas-warning"
+              >
+                {tl("trade.paymentIntent.gasWarning")}
+              </p>
+            )}
+          <p className="text-xs text-muted-foreground">
+            {tl("trade.paymentIntent.amount")}:{" "}
+            {trade.paymentIntent.exactAmount.toString()}
+          </p>
+          <p className="text-xs text-muted-foreground font-mono break-all">
+            {tl("trade.paymentIntent.recipient")}:{" "}
+            {trade.paymentIntent.recipient}
+          </p>
+          {trade.paymentIntent.expiry != null && (
+            <p className="text-xs text-muted-foreground">
+              {tl("trade.paymentIntent.expiry")}:{" "}
+              {formatDeadline(trade.paymentIntent.expiry)}
+            </p>
+          )}
+        </div>
+      )}
+
+      {!onChain && isSeller && s === TradeStatus.payment_intent && (
+        <ManualPaymentPathPanel
+          trade={trade}
+          gateOn={gateOn}
+          onCreateManual={() =>
+            void doAction(
+              () =>
+                actor!.createPaymentIntent(
+                  trade.id,
+                  1n,
+                  PaymentSettlementPath.manual,
+                ),
+              tl("trade.action.createPaymentIntent"),
+            )
+          }
+        />
+      )}
+
+      {!onChain &&
+        isBuyer &&
+        (s === TradeStatus.manual_payment_pending ||
+          s === TradeStatus.pending) && (
+          <div className="space-y-2">
+            <Button
+              className="w-full gap-2"
+              onClick={() =>
+                doAction(
+                  () => actor!.confirmPaymentSent(trade.id),
+                  tl("trade.action.buyerSent"),
+                )
+              }
+              data-ocid="btn-payment-sent"
+            >
+              <Banknote className="w-4 h-4" />
+              {tl("trade.action.buyerSent")}
+            </Button>
+            <p className="text-xs text-muted-foreground text-center px-2">
+              {tl("trade.hint.sendOffChain")}
+            </p>
+          </div>
+        )}
+
+      {!onChain && isSeller && s === TradeStatus.buyer_confirmed && (
         <SellerReminderPanel
           amount={trade.amount}
           token={trade.token as TradeToken}
         />
       )}
 
-      {/* Buyer: confirm payment sent */}
-      {isBuyer && s === TradeStatus.pending && (
-        <div className="space-y-2">
-          <Button
-            className="w-full gap-2"
-            onClick={() =>
-              doAction(
-                () => actor!.confirmPaymentSent(trade.id),
-                tl("trade.action.buyerSent"),
-              )
-            }
-            data-ocid="btn-payment-sent"
-          >
-            <Banknote className="w-4 h-4" />
-            {tl("trade.action.buyerSent")}
-          </Button>
-          <p className="text-xs text-muted-foreground text-center px-2">
-            {tl("trade.hint.sendOffChain")}
-          </p>
-        </div>
-      )}
+      {!onChain &&
+        isBuyer &&
+        (s === TradeStatus.manual_payment_pending ||
+          s === TradeStatus.buyer_confirmed) && (
+          <PaymentVerificationWidget
+            tradeId={trade.id}
+            token={trade.token as TradeToken}
+          />
+        )}
 
-      {/* Buyer: verify on blockchain after confirming sent */}
-      {isBuyer && s === TradeStatus.buyer_confirmed && (
-        <PaymentVerificationWidget
-          tradeId={trade.id}
-          token={trade.token as TradeToken}
-        />
-      )}
-
-      {/* Seller: "Confirm Delivery & Release Funds" — shown when tracking says delivered */}
-      {!isBuyer &&
+      {/* Seller: legacy delivery confirm — digital trades only (E7.S3) */}
+      {!isPhysicalTrade &&
+        isSeller &&
         trackingInfo?.isDelivered &&
         (s === TradeStatus.payment_verified ||
           s === TradeStatus.buyer_confirmed) && (
@@ -435,8 +899,9 @@ function TradeActions({
           </Button>
         )}
 
-      {/* Seller: confirm receipt when payment is verified on-chain (fallback when no tracking delivery) */}
-      {!isBuyer &&
+      {/* Seller: confirm receipt when payment verified — digital only */}
+      {!isPhysicalTrade &&
+        isSeller &&
         s === TradeStatus.payment_verified &&
         !trackingInfo?.isDelivered && (
           <div className="space-y-2">
@@ -459,27 +924,58 @@ function TradeActions({
           </div>
         )}
 
-      {/* Seller: manual confirm when funded (pre-verification fallback) */}
-      {!isBuyer && s === TradeStatus.funded && !trackingInfo?.isDelivered && (
-        <div className="space-y-2">
+      {/* Buyer: confirm physical receipt before NP 48h grace (E7.S3) */}
+      {isPhysicalTrade &&
+        isBuyer &&
+        (s === TradeStatus.shipped ||
+          s === TradeStatus.awaiting_receipt ||
+          s === TradeStatus.fulfillment_pending) &&
+        trade.ttnNumber != null && (
           <Button
-            className="w-full gap-2"
+            className="w-full gap-2 bg-green-600 hover:bg-green-700 text-white"
             onClick={() =>
               doAction(
-                () => actor!.confirmPaymentReceived(trade.id),
-                tl("trade.action.sellerReceived"),
+                () => actor!.confirmBuyerReceipt(trade.id),
+                tl("trade.confirmDeliveryReleaseFunds"),
               )
             }
-            data-ocid="btn-payment-received"
+            data-ocid="buyer-confirm-receipt-btn"
           >
             <CheckCircle2 className="w-4 h-4" />
-            {tl("trade.action.sellerReceived")}
+            {tl("trade.confirmDeliveryReleaseFunds")}
           </Button>
-          <p className="text-xs text-muted-foreground text-center px-2">
-            {tl("trade.hint.verifyOffChain")}
-          </p>
-        </div>
-      )}
+        )}
+
+      {/* Seller: manual confirm when funded (pre-verification fallback) — digital */}
+      {!isPhysicalTrade &&
+        isSeller &&
+        s === TradeStatus.funded &&
+        !trackingInfo?.isDelivered && (
+          <div className="space-y-2">
+            <Button
+              className="w-full gap-2"
+              onClick={() =>
+                doAction(
+                  () => actor!.confirmPaymentReceived(trade.id),
+                  tl("trade.action.sellerReceived"),
+                )
+              }
+              data-ocid="btn-payment-received"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              {onChain
+                ? tl("trade.onChain.actionRelease")
+                : tl("trade.action.sellerReceived")}
+            </Button>
+            {onChain ? (
+              <OnChainReleaseHint isSeller />
+            ) : (
+              <p className="text-xs text-muted-foreground text-center px-2">
+                {tl("trade.hint.verifyOffChain")}
+              </p>
+            )}
+          </div>
+        )}
 
       {isBuyer &&
         [
@@ -527,7 +1023,84 @@ function TradeActions({
         </Button>
       )}
 
-      {[TradeStatus.pending, TradeStatus.funded].includes(s) && (
+      {isBuyer && BUYER_CANCEL_STATUSES.includes(s) && !trade.ttnNumber && (
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button
+              variant="outline"
+              className="w-full gap-2 border-destructive/40 text-destructive hover:bg-destructive/10"
+              data-ocid="btn-buyer-cancel-pre-ship"
+            >
+              <XCircle className="w-4 h-4" />
+              {tl("trade.buyerCancel.beforeShip")}
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent data-ocid="buyer-cancel-pre-ship-dialog">
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {tl("trade.buyerCancel.confirmTitle")}
+              </AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <div className="space-y-3 text-sm text-muted-foreground">
+                  <p>{tl("trade.buyerCancel.confirmBody")}</p>
+                  {(() => {
+                    const split = computeBuyerCancelSplitPreview(
+                      lockedAmountForBuyerCancel(trade),
+                    );
+                    return (
+                      <ul className="rounded-md border border-border bg-muted/30 p-3 space-y-1.5 text-foreground">
+                        <li>
+                          {tl("trade.buyerCancel.buyerLine").replace(
+                            "{amount}",
+                            formatAmount(
+                              split.buyer,
+                              trade.token as TradeToken,
+                            ),
+                          )}
+                        </li>
+                        <li>
+                          {tl("trade.buyerCancel.sellerLine").replace(
+                            "{amount}",
+                            formatAmount(
+                              split.seller,
+                              trade.token as TradeToken,
+                            ),
+                          )}
+                        </li>
+                        <li>
+                          {tl("trade.buyerCancel.platformLine").replace(
+                            "{amount}",
+                            formatAmount(
+                              split.platform,
+                              trade.token as TradeToken,
+                            ),
+                          )}
+                        </li>
+                      </ul>
+                    );
+                  })()}
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{tl("detail.cancel")}</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={() =>
+                  doAction(
+                    () => actor!.buyerCancelBeforeShipment(trade.id),
+                    tl("trade.buyerCancel.success"),
+                  )
+                }
+              >
+                {tl("trade.buyerCancel.confirmAction")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+
+      {[TradeStatus.payment_intent, TradeStatus.pending].includes(s) && (
         <Button
           variant="ghost"
           className="w-full gap-2 text-muted-foreground hover:text-foreground"
@@ -553,6 +1126,9 @@ const ACTIVE_SHIPPING_STATUSES: TradeStatus[] = [
   TradeStatus.funded,
   TradeStatus.buyer_confirmed,
   TradeStatus.payment_verified,
+  TradeStatus.fulfillment_pending,
+  TradeStatus.shipped,
+  TradeStatus.awaiting_receipt,
   TradeStatus.complete,
 ];
 
@@ -579,6 +1155,26 @@ function TTNControls({
   const { t: tl } = useLocale();
   const [manualTTN, setManualTTN] = useState("");
   const [savedManualTTN, setSavedManualTTN] = useState("");
+
+  const markShippedMutation = useMutation({
+    mutationFn: (ttn: string) => actor!.markShipped(trade.id, ttn),
+    onSuccess: (res, ttn) => {
+      if (res.__kind__ === "ok") {
+        setSavedManualTTN(ttn);
+        onManualTTNSaved?.(ttn);
+        toast.success(tl("trade.manualTTNSave"));
+        qc.invalidateQueries({ queryKey: ["trade", trade.id.toString()] });
+      } else {
+        const errObj = res.err as Record<string, unknown>;
+        toast.error(
+          (errObj.invalid_input as string) ??
+            (errObj.escrow_error as string) ??
+            tl("trade.ttnFailed"),
+        );
+      }
+    },
+    onError: () => toast.error(tl("trade.ttnFailed")),
+  });
 
   const realTrackingNumber: string | null = trade.ttnNumber ?? null;
   const provider = getShippingProvider(trade);
@@ -764,13 +1360,10 @@ function TTNControls({
                 size="sm"
                 variant="secondary"
                 className="h-8 shrink-0"
-                disabled={!manualTTN.trim()}
+                disabled={!manualTTN.trim() || markShippedMutation.isPending}
                 onClick={() => {
-                  if (manualTTN.trim()) {
-                    setSavedManualTTN(manualTTN.trim());
-                    onManualTTNSaved?.(manualTTN.trim());
-                    toast.success(tl("trade.manualTTNSave"));
-                  }
+                  const ttn = manualTTN.trim();
+                  if (ttn) markShippedMutation.mutate(ttn);
                 }}
                 data-ocid="ttn-manual-save-button"
               >
@@ -843,7 +1436,7 @@ function DigitalDeliveryCard({
   tradeId,
   actor,
 }: {
-  delivery: DigitalDelivery;
+  delivery: DigitalDeliveryView;
   isBuyer: boolean;
   tradeId: bigint;
   actor: import("../backend.d").backendInterface | null;
@@ -1022,6 +1615,9 @@ function DigitalDeliveryCard({
               {tl("digital.delivery.inspectionCountdown")
                 .replace("{hours}", String(countdown.hours))
                 .replace("{minutes}", String(countdown.minutes))}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {tl("digital.delivery.inspectionRedownloadNote")}
             </p>
           </div>
 
@@ -1285,11 +1881,13 @@ export default function TradeDetailPage() {
   );
   const [manualTTNFromControls, setManualTTNFromControls] = useState("");
   const { isVisible, justBecameVisible } = useVisiblePolling();
+  const principalKey = identity?.getPrincipal().toText() ?? "anon";
 
-  const id = BigInt(tradeId);
+  const tradeIdValid = /^\d+$/.test(tradeId ?? "");
+  const id = tradeIdValid ? BigInt(tradeId) : 0n;
 
   const { data: myProfile } = useQuery({
-    queryKey: ["myProfile"],
+    queryKey: ["myProfile", principalKey],
     queryFn: () => actor!.getMyProfile(),
     enabled: !!actor && !isFetching,
   });
@@ -1297,12 +1895,15 @@ export default function TradeDetailPage() {
   const {
     data: trade,
     isLoading: tradeLoading,
+    isError: tradeError,
+    isFetched: tradeFetched,
     refetch: refetchTrade,
   } = useQuery({
     queryKey: ["trade", tradeId],
     queryFn: () => actor!.getTrade(id),
-    enabled: !!actor && !isFetching,
+    enabled: !!actor && !isFetching && tradeIdValid,
     refetchInterval: isVisible ? 30_000 : false,
+    staleTime: 15_000,
   });
 
   const { data: listing } = useQuery({
@@ -1312,9 +1913,10 @@ export default function TradeDetailPage() {
   });
 
   const { data: unreadCounts = [] } = useQuery({
-    queryKey: ["unreadCounts"],
+    queryKey: ["unreadCount", "notifications"],
     queryFn: () => actor!.getUnreadCount(),
     enabled: !!actor && !isFetching,
+    staleTime: 30_000,
   });
 
   // Determine buyer/seller before digital delivery query (hooks must be unconditional)
@@ -1334,7 +1936,8 @@ export default function TradeDetailPage() {
       !isFetching &&
       !!trade &&
       isBuyerCheck &&
-      trade.status === TradeStatus.complete,
+      (trade.status === TradeStatus.complete ||
+        trade.status === TradeStatus.digital_delivered),
   });
 
   // Dispute info query — fetch when trade is disputed, poll every 60s for vote tally updates
@@ -1349,6 +1952,24 @@ export default function TradeDetailPage() {
     refetchInterval: isVisible ? 60_000 : false,
   });
 
+  useEffect(() => {
+    if (
+      !actor ||
+      !trade ||
+      trade.status !== TradeStatus.awaiting_seller_handshake
+    ) {
+      return;
+    }
+    const tick = () => {
+      void actor.checkHandshakeTimeouts().then(() => {
+        void refetchTrade();
+      });
+    };
+    tick();
+    const interval = window.setInterval(tick, 60_000);
+    return () => window.clearInterval(interval);
+  }, [actor, trade, refetchTrade]);
+
   // Catch up on missed updates when tab becomes visible after > 30s hidden
   useEffect(() => {
     if (justBecameVisible) {
@@ -1357,6 +1978,21 @@ export default function TradeDetailPage() {
       void refetchDelivery();
     }
   }, [justBecameVisible, refetchTrade, refetchDisputes, refetchDelivery]);
+
+  if (!tradeIdValid) {
+    return (
+      <div
+        className="min-h-screen bg-background flex flex-col items-center justify-center gap-4"
+        data-ocid="trade-invalid-id"
+      >
+        <span className="text-5xl">🔍</span>
+        <p className="text-foreground font-semibold">{tl("trade.notFound")}</p>
+        <Button variant="outline" onClick={() => navigate({ to: "/trades" })}>
+          {tl("trades.title")}
+        </Button>
+      </div>
+    );
+  }
 
   if (tradeLoading) {
     return (
@@ -1371,16 +2007,38 @@ export default function TradeDetailPage() {
     );
   }
 
-  if (!trade) {
+  if (tradeError) {
     return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-4">
+      <div
+        className="min-h-screen bg-background flex flex-col items-center justify-center gap-4 px-4 text-center"
+        data-ocid="trade-load-error"
+      >
+        <span className="text-5xl">⚠️</span>
+        <p className="text-foreground font-semibold">{tl("trade.loadError")}</p>
+        <Button variant="outline" onClick={() => void refetchTrade()}>
+          {tl("detail.retry")}
+        </Button>
+      </div>
+    );
+  }
+
+  if (tradeFetched && !trade) {
+    return (
+      <div
+        className="min-h-screen bg-background flex flex-col items-center justify-center gap-4"
+        data-ocid="trade-not-found"
+      >
         <span className="text-5xl">🔍</span>
-        <p className="text-foreground font-semibold">{tl("detail.notFound")}</p>
+        <p className="text-foreground font-semibold">{tl("trade.notFound")}</p>
         <Button variant="outline" onClick={() => navigate({ to: "/trades" })}>
           {tl("trades.title")}
         </Button>
       </div>
     );
+  }
+
+  if (!trade) {
+    return null;
   }
 
   const isBuyer = isBuyerCheck;
@@ -1410,7 +2068,7 @@ export default function TradeDetailPage() {
     listing?.shippingMethods?.[0]?.carrier === ShippingCarrier.digital
   );
 
-  const digitalDelivery: import("../backend.d").DigitalDelivery | null =
+  const digitalDelivery: DigitalDeliveryView | null =
     trade.digitalDelivery ?? queriedDelivery ?? null;
 
   const activeDispute: DisputeView | null = disputes?.[0] ?? null;
@@ -1475,6 +2133,11 @@ export default function TradeDetailPage() {
               </div>
             )}
 
+            <BuyerProtectionBadge
+              tradeAmountE8s={trade.amount}
+              tradeToken={trade.token}
+            />
+
             {/* Counterparty info */}
             <div className="card-elevated p-4 space-y-2">
               <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">
@@ -1502,6 +2165,7 @@ export default function TradeDetailPage() {
                 fundedAt={trade.fundedAt}
                 confirmedAt={trade.confirmedAt}
                 completedAt={trade.completedAt}
+                sellerResponseDeadline={trade.sellerResponseDeadline}
               />
 
               <Separator className="my-4" />
@@ -1509,6 +2173,8 @@ export default function TradeDetailPage() {
               <TradeActions
                 trade={trade}
                 isBuyer={isBuyer}
+                isSeller={isSeller}
+                isPhysicalTrade={hasShipping}
                 onDisputeOpen={() => setDisputeOpen(true)}
               />
             </div>
@@ -1525,6 +2191,8 @@ export default function TradeDetailPage() {
             {trade.status === TradeStatus.disputed && activeDispute && (
               <DisputeStatusCard dispute={activeDispute} />
             )}
+
+            <SellerFaultSettlementPanel tradeId={trade.id} />
 
             {/* Digital delivery card */}
             {isDigitalTrade &&
@@ -1564,6 +2232,7 @@ export default function TradeDetailPage() {
               </div>
             )}
             {(trade.status === TradeStatus.cancelled ||
+              trade.status === TradeStatus.cancelled_buyer_pre_ship ||
               trade.status === TradeStatus.refunded) && (
               <div
                 className="flex items-start gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2.5"
@@ -1619,6 +2288,11 @@ export default function TradeDetailPage() {
 
             <TabsContent value="escrow" className="space-y-3">
               {listing && <ListingSummaryCard listing={listing} />}
+              <BuyerProtectionBadge
+                tradeAmountE8s={trade.amount}
+                tradeToken={trade.token}
+                compact
+              />
 
               <div className="card-elevated p-3 sm:p-5">
                 <h2 className="text-sm font-semibold text-foreground mb-4">
@@ -1630,11 +2304,14 @@ export default function TradeDetailPage() {
                   fundedAt={trade.fundedAt}
                   confirmedAt={trade.confirmedAt}
                   completedAt={trade.completedAt}
+                  sellerResponseDeadline={trade.sellerResponseDeadline}
                 />
                 <Separator className="my-3" />
                 <TradeActions
                   trade={trade}
                   isBuyer={isBuyer}
+                  isSeller={isSeller}
+                  isPhysicalTrade={hasShipping}
                   onDisputeOpen={() => setDisputeOpen(true)}
                 />
               </div>
@@ -1656,6 +2333,8 @@ export default function TradeDetailPage() {
               {trade.status === TradeStatus.disputed && activeDispute && (
                 <DisputeStatusCard dispute={activeDispute} />
               )}
+
+              <SellerFaultSettlementPanel tradeId={trade.id} />
             </TabsContent>
 
             <TabsContent
@@ -1675,6 +2354,7 @@ export default function TradeDetailPage() {
                 </div>
               )}
               {(trade.status === TradeStatus.cancelled ||
+                trade.status === TradeStatus.cancelled_buyer_pre_ship ||
                 trade.status === TradeStatus.refunded) && (
                 <div
                   className="flex items-start gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2.5 flex-shrink-0"
@@ -1717,11 +2397,14 @@ export default function TradeDetailPage() {
       </div>
 
       {/* Dispute modal */}
-      {disputeOpen && (
+      {disputeOpen && trade && (
         <DisputeModal
           open={disputeOpen}
           onClose={() => setDisputeOpen(false)}
           tradeId={trade.id}
+          tradeKind={isDigitalTrade ? "digital" : "physical"}
+          digitalFileHash={digitalDelivery?.fileHash ?? null}
+          downloadTimestamp={digitalDelivery?.revealedAt ?? null}
         />
       )}
     </div>

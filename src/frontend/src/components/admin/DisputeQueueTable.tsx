@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Clock } from "lucide-react";
 import { useState } from "react";
 import type { DisputeView } from "../../backend.d";
 import { DisputeStatus } from "../../backend.d";
@@ -26,25 +26,91 @@ const REASON_LABELS: Record<string, string> = {
   item_not_received: "Not Received",
 };
 
-function DisputeStatusBadge({ status }: { status: DisputeStatus }) {
+function formatSlaCountdown(
+  deadlineNs: bigint,
+  nowNs: bigint = BigInt(Date.now()) * 1_000_000n,
+): string {
+  const remaining = Number(deadlineNs - nowNs) / 1_000_000_000;
+  if (remaining <= 0) return "Overdue";
+  const hours = Math.floor(remaining / 3600);
+  const mins = Math.floor((remaining % 3600) / 60);
+  if (hours >= 24) return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+  if (hours > 0) return `${hours}h ${mins}m`;
+  return `${mins}m`;
+}
+
+function SlaCountdownCell({ dispute }: { dispute: DisputeView }) {
+  const flags = dispute.slaFlags;
+  const overdue =
+    flags?.l1SlaOverdue || flags?.l2TriageOverdue || flags?.l2DecisionOverdue;
+
+  let deadline: bigint | null = null;
+  if (dispute.status === DisputeStatus.opened) {
+    deadline = dispute.l1SlaDeadline;
+  } else if (
+    dispute.status === DisputeStatus.l2_queued ||
+    dispute.status === DisputeStatus.under_review
+  ) {
+    deadline = dispute.l2DecisionDeadline ?? dispute.l2TriageDeadline ?? null;
+  }
+
+  if (deadline == null) {
+    return <span className="text-xs text-muted-foreground">—</span>;
+  }
+
+  const label = formatSlaCountdown(deadline);
+  return (
+    <span
+      data-ocid="dispute-sla-countdown"
+      className={`inline-flex items-center gap-1 text-xs font-medium ${
+        overdue ? "text-destructive" : "text-muted-foreground"
+      }`}
+    >
+      <Clock className="h-3 w-3" />
+      {label}
+    </span>
+  );
+}
+
+function DisputeStatusBadge({
+  status,
+  slaFlags,
+}: {
+  status: DisputeStatus;
+  slaFlags?: DisputeView["slaFlags"];
+}) {
+  const overdue =
+    slaFlags?.l1SlaOverdue ||
+    slaFlags?.l2TriageOverdue ||
+    slaFlags?.l2DecisionOverdue;
   const cls =
     status === DisputeStatus.opened
       ? "status-badge-dispute"
-      : status === DisputeStatus.under_review
-        ? "status-badge-funded"
-        : "status-badge-confirmed";
+      : status === DisputeStatus.l2_queued
+        ? overdue
+          ? "status-badge-dispute border-destructive text-destructive"
+          : "status-badge-funded"
+        : status === DisputeStatus.under_review
+          ? "status-badge-funded"
+          : "status-badge-confirmed";
   const label =
     status === DisputeStatus.opened
-      ? "Opened"
-      : status === DisputeStatus.under_review
-        ? "Under Review"
-        : "Resolved";
+      ? "L1"
+      : status === DisputeStatus.l2_queued
+        ? overdue
+          ? "L2 overdue"
+          : "L2 queue"
+        : status === DisputeStatus.under_review
+          ? "Under Review"
+          : String(status);
   return <span className={cls}>{label}</span>;
 }
 
 export default function DisputeQueueTable() {
   const [offset, setOffset] = useState(0n);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [levelFilter, setLevelFilter] = useState<string>("all");
+  const [overdueOnly, setOverdueOnly] = useState(false);
   const [selectedDispute, setSelectedDispute] = useState<DisputeView | null>(
     null,
   );
@@ -67,8 +133,28 @@ export default function DisputeQueueTable() {
       ? allDisputes
       : allDisputes.filter((d) => String(d.status) === statusFilter);
 
+  const levelFiltered =
+    levelFilter === "all"
+      ? filtered
+      : levelFilter === "l1"
+        ? filtered.filter((d) => d.status === DisputeStatus.opened)
+        : filtered.filter(
+            (d) =>
+              d.status === DisputeStatus.l2_queued ||
+              d.status === DisputeStatus.under_review,
+          );
+
+  const overdueFiltered = overdueOnly
+    ? levelFiltered.filter(
+        (d) =>
+          d.slaFlags?.l1SlaOverdue ||
+          d.slaFlags?.l2TriageOverdue ||
+          d.slaFlags?.l2DecisionOverdue,
+      )
+    : levelFiltered;
+
   // Sort by newest first
-  const sorted = [...filtered].sort((a, b) =>
+  const sorted = [...overdueFiltered].sort((a, b) =>
     Number(b.createdAt - a.createdAt),
   );
 
@@ -81,7 +167,20 @@ export default function DisputeQueueTable() {
             Dispute Queue
           </h2>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={levelFilter} onValueChange={setLevelFilter}>
+            <SelectTrigger
+              data-ocid="dispute-level-filter"
+              className="w-32 text-sm"
+            >
+              <SelectValue placeholder="Level" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All levels</SelectItem>
+              <SelectItem value="l1">L1 only</SelectItem>
+              <SelectItem value="l2">L2 only</SelectItem>
+            </SelectContent>
+          </Select>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger
               data-ocid="dispute-status-filter"
@@ -91,11 +190,21 @@ export default function DisputeQueueTable() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All statuses</SelectItem>
-              <SelectItem value="opened">Opened</SelectItem>
+              <SelectItem value="opened">L1 (Opened)</SelectItem>
+              <SelectItem value="l2_queued">L2 Queue</SelectItem>
               <SelectItem value="under_review">Under Review</SelectItem>
               <SelectItem value="resolved">Resolved</SelectItem>
             </SelectContent>
           </Select>
+          <Button
+            type="button"
+            data-ocid="dispute-overdue-filter"
+            variant={overdueOnly ? "default" : "outline"}
+            size="sm"
+            onClick={() => setOverdueOnly((v) => !v)}
+          >
+            Overdue
+          </Button>
         </div>
       </div>
 
@@ -131,6 +240,9 @@ export default function DisputeQueueTable() {
                   Reason
                 </th>
                 <th className="px-4 py-3 text-left font-semibold text-foreground">
+                  SLA
+                </th>
+                <th className="px-4 py-3 text-left font-semibold text-foreground">
                   Status
                 </th>
                 <th className="px-4 py-3 text-right font-semibold text-foreground">
@@ -162,8 +274,12 @@ export default function DisputeQueueTable() {
                       String(dispute.reason)}
                   </td>
                   <td className="px-4 py-3">
+                    <SlaCountdownCell dispute={dispute} />
+                  </td>
+                  <td className="px-4 py-3">
                     <DisputeStatusBadge
                       status={dispute.status as DisputeStatus}
+                      slaFlags={dispute.slaFlags}
                     />
                   </td>
                   <td className="px-4 py-3 text-right text-muted-foreground">

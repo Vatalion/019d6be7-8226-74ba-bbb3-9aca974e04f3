@@ -1,13 +1,18 @@
-import { createActor } from "@/backend";
+import { type Backend, type TradeCapTierCheck, createActor } from "@/backend";
 import {
   ItemCondition,
-  type ShippingCarrier,
+  ShippingCarrier,
   type ShippingOption,
+  TradeCapTier,
+  type TradeFeeQuote,
   TradeToken,
   TrustLevel,
   type UserProfile,
   UserRole,
 } from "@/backend.d";
+import { FavoriteButton } from "@/components/marketplace/FavoriteButton";
+import { ListingInquiryPanel } from "@/components/marketplace/ListingInquiryPanel";
+import { ShareListingButton } from "@/components/marketplace/ShareListingButton";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,8 +27,11 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+import { asEngagementActor, isResultErr } from "@/lib/engagementActor";
 import type { ListingCard } from "@/types";
 import { useActor, useInternetIdentity } from "@caffeineai/core-infrastructure";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -33,32 +41,26 @@ import {
   ChevronLeft,
   ChevronRight,
   ExternalLink,
+  Flag,
+  Loader2,
   LogIn,
   MapPin,
   PackageSearch,
   Pencil,
   PowerOff,
   RefreshCw,
-  Share2,
   ShieldCheck,
-  Star,
-  Flag,
   Sparkles,
+  Star,
 } from "lucide-react";
-import { FavoriteButton } from "@/components/marketplace/FavoriteButton";
-import { ListingInquiryPanel } from "@/components/marketplace/ListingInquiryPanel";
-import {
-  asEngagementActor,
-  isResultErr,
-} from "@/lib/engagementActor";
-import { useState } from "react";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ShippingProviderSelector } from "../components/shared/ShippingProviderSelector";
 import { useLocale } from "../hooks/useLocale";
 import { detectLocale, t } from "../i18n";
 import { ACTIVE_PHYSICAL_SHIPPING_CARRIER } from "../lib/deliveryPolicy";
+import { initiateListingTrade } from "../lib/initiateListingTrade";
+import { formatTokenAmount, toTradeFeeQuoteView } from "../lib/tradeFeeQuote";
 
 const TOKEN_COLORS: Record<string, string> = {
   USDT_TRC20:
@@ -114,13 +116,102 @@ const TOKEN_DISPLAY: Record<string, string> = {
   USDC_ERC20: "USDC · ERC20",
 };
 
+const CARRIER_LABEL_KEYS: Partial<Record<ShippingCarrier, string>> = {
+  [ShippingCarrier.self_pickup]: "carrier.self_pickup",
+  [ShippingCarrier.nova_poshta]: "carrier.nova_poshta",
+  [ShippingCarrier.ukrposhta]: "carrier.ukrposhta",
+  [ShippingCarrier.meest]: "carrier.meest",
+  [ShippingCarrier.digital]: "carrier.digital",
+};
+
+function fallbackFeeQuote(
+  priceAmount: bigint,
+  priceToken: TradeToken,
+): TradeFeeQuote {
+  const platformFeeAmount = (priceAmount * 300n + 9999n) / 10000n;
+  return {
+    itemPrice: priceAmount,
+    platformFeeAmount,
+    platformFeeBps: 300n,
+    totalBuyerAmount: priceAmount + platformFeeAmount,
+    token: priceToken,
+    usesDefaultFeeBps: true,
+  };
+}
+
 function formatTokenDisplay(token: TradeToken | string): string {
   return TOKEN_DISPLAY[String(token)] ?? String(token);
 }
 
-function formatPrice(amount: bigint, _token: TradeToken): string {
-  const n = Number(amount);
-  return `$${(n / 1_000_000).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+function formatPrice(amount: bigint, token: TradeToken): string {
+  return formatTokenAmount(amount, token);
+}
+
+function tradeCapTierBand(
+  check: TradeCapTierCheck,
+): "standard" | "elevated" | "highValueCk" | "rejected" {
+  if (check.tier === TradeCapTier.rejected) return "rejected";
+  if (check.tier === TradeCapTier.high_value_ck) return "highValueCk";
+  if (check.tier === TradeCapTier.elevated) return "elevated";
+  return "standard";
+}
+
+function tradeCapMessageKey(check: TradeCapTierCheck): string {
+  const band = tradeCapTierBand(check);
+  if (!check.allowed) {
+    if (band === "rejected") return "detail.tradeCap.rejected";
+    if (band === "highValueCk" && check.gateCRequired) {
+      return "detail.tradeCap.gateCOff";
+    }
+    if (band === "elevated") return "detail.tradeCap.elevatedStakeMissing";
+    return "detail.tradeCap.blocked";
+  }
+  switch (band) {
+    case "rejected":
+      return "detail.tradeCap.rejected";
+    case "highValueCk":
+      return "detail.tradeCap.highValueCk";
+    case "elevated":
+      return check.sellerVerifiedTierOk
+        ? "detail.tradeCap.elevatedVerifiedOk"
+        : check.sellerStakeOk
+          ? "detail.tradeCap.elevatedStakeOk"
+          : "detail.tradeCap.elevated";
+    default:
+      return "detail.tradeCap.standard";
+  }
+}
+
+function TradeCapRequirementsPanel({
+  check,
+}: {
+  check: TradeCapTierCheck;
+}) {
+  const { t: tl } = useLocale();
+  const band = tradeCapTierBand(check);
+  const messageKey = tradeCapMessageKey(check);
+  const isWarning = !check.allowed || band !== "standard";
+
+  if (!isWarning && band === "standard") {
+    return null;
+  }
+
+  return (
+    <div
+      className={`rounded-lg border px-3 py-2 text-xs ${
+        check.allowed
+          ? "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200"
+          : "border-destructive/40 bg-destructive/10 text-destructive"
+      }`}
+      data-ocid={`trade-cap-tier-${band}`}
+    >
+      <p className="font-semibold">{tl("detail.tradeCap.title")}</p>
+      <p className="mt-1">{tl(messageKey as Parameters<typeof tl>[0])}</p>
+      {(check.blockReason?.length ?? 0) > 0 && (
+        <p className="mt-1 opacity-90">{check.blockReason?.[0]}</p>
+      )}
+    </div>
+  );
 }
 
 function PhotoCarousel({ photos, title }: { photos: string[]; title: string }) {
@@ -328,6 +419,7 @@ export default function ListingDetailPage() {
 
   const [selectedCarrier, setSelectedCarrier] =
     useState<ShippingCarrier | null>(ACTIVE_PHYSICAL_SHIPPING_CARRIER);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState("");
 
@@ -335,15 +427,44 @@ export default function ListingDetailPage() {
     data: listing,
     isLoading,
     isError,
+    isFetched,
+    refetch: refetchListing,
   } = useQuery<ListingCard | null>({
     queryKey: ["listing", params.id],
     queryFn: async () => {
       if (!actor) return null;
-      await actor.incrementListingView(listingId);
       return actor.getListing(listingId) as Promise<ListingCard | null>;
     },
     enabled: !!actor && !isFetching,
+    staleTime: 30_000,
   });
+
+  useEffect(() => {
+    if (!actor || !listing) return;
+    void actor.incrementListingView(listingId).catch(() => {});
+  }, [actor, listing, listingId]);
+
+  const { data: platformFlags } = useQuery({
+    queryKey: ["platformFlags"],
+    queryFn: async () => {
+      if (!actor) return null;
+      return actor.getPlatformFlags();
+    },
+    enabled: !!actor && !isFetching,
+    staleTime: 60_000,
+  });
+
+  const { data: tradeCapCheck } = useQuery<TradeCapTierCheck | null>({
+    queryKey: ["tradeCapTierCheck", params.id, listing?.priceToken],
+    queryFn: async () => {
+      if (!actor || !listing) return null;
+      return actor.tradeCapTierCheck(listingId, listing.priceToken);
+    },
+    enabled: !!actor && !!listing && !isFetching,
+    staleTime: 60_000,
+  });
+
+  const tradeCapBlocked = tradeCapCheck != null && !tradeCapCheck.allowed;
 
   const { data: myProfile } = useQuery<UserProfile | null>({
     queryKey: ["myProfile"],
@@ -387,6 +508,17 @@ export default function ListingDetailPage() {
     myProfile?.role === UserRole.admin ||
     myProfile?.role === UserRole.moderator;
 
+  const { data: feeQuoteRaw, isLoading: feeQuoteLoading } =
+    useQuery<TradeFeeQuote | null>({
+      queryKey: ["tradeFeeQuote", params.id],
+      queryFn: async () => {
+        if (!actor) return null;
+        return actor.getTradeFeeQuote(listingId);
+      },
+      enabled: !!actor && checkoutOpen && !isFetching,
+      staleTime: 60_000,
+    });
+
   const reportMutation = useMutation({
     mutationFn: async () => {
       if (!actor || !listing) throw new Error("Not ready");
@@ -425,16 +557,6 @@ export default function ListingDetailPage() {
     },
     onError: () => toast.error("Could not bump listing"),
   });
-
-  const handleShareLink = async () => {
-    const url = window.location.href;
-    try {
-      await navigator.clipboard.writeText(url);
-      toast.success(tl("detail.linkCopied"));
-    } catch {
-      toast.error(tl("detail.reportError"));
-    }
-  };
 
   const removeMutation = useMutation({
     mutationFn: async () => {
@@ -503,12 +625,51 @@ export default function ListingDetailPage() {
     },
   });
 
+  const startTradeMutation = useMutation({
+    mutationFn: async () => {
+      if (!actor || !listing) throw new Error("not ready");
+      const carrier = selectedCarrier ?? ACTIVE_PHYSICAL_SHIPPING_CARRIER;
+      const tradeId = await initiateListingTrade(
+        actor as Backend,
+        listingId,
+        listing.priceToken,
+        carrier,
+        {
+          navigate,
+          identity: identity ?? undefined,
+          amount: listing.priceAmount,
+        },
+      );
+      if (tradeId == null) throw new Error("initiate_failed");
+      return tradeId;
+    },
+    onSuccess: (tradeId) => {
+      setCheckoutOpen(false);
+      void queryClient.invalidateQueries({ queryKey: ["myTrades"] });
+      navigate({
+        to: "/trades/$id",
+        params: { id: String(tradeId) },
+      });
+    },
+    onError: () => {
+      toast.error(tl("detail.buyError"));
+    },
+  });
+
   const handleBuyNow = () => {
     if (!isAuthed) {
       login();
       return;
     }
-    navigate({ to: "/trades", search: { initiate: params.id } });
+    if (!selectedCarrier) {
+      toast.error(tl("detail.selectShippingAndBuy"));
+      return;
+    }
+    setCheckoutOpen(true);
+  };
+
+  const handleConfirmCheckout = () => {
+    startTradeMutation.mutate();
   };
 
   const handleCarrierSelect = (
@@ -534,7 +695,25 @@ export default function ListingDetailPage() {
     );
   }
 
-  if (isError || !listing) {
+  if (isError) {
+    return (
+      <div
+        className="flex flex-col items-center justify-center min-h-[60vh] gap-4 text-center px-4"
+        data-ocid="listing-load-error"
+      >
+        <AlertTriangle className="h-12 w-12 text-destructive opacity-80" />
+        <h2 className="text-xl font-semibold text-foreground">
+          {tl("detail.loadError")}
+        </h2>
+        <Button variant="outline" onClick={() => void refetchListing()}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          {tl("detail.retry")}
+        </Button>
+      </div>
+    );
+  }
+
+  if (isFetched && !listing) {
     return (
       <div
         className="flex flex-col items-center justify-center min-h-[60vh] gap-4 text-center px-4"
@@ -554,6 +733,10 @@ export default function ListingDetailPage() {
     );
   }
 
+  if (!listing) {
+    return null;
+  }
+
   // Derive shipping city from listing location for the selector
   const fromCity = listing.location?.split(",")[0]?.trim() ?? "";
 
@@ -563,8 +746,18 @@ export default function ListingDetailPage() {
       tk === listing.priceToken || APPROVED_TOKENS.includes(tk as TradeToken),
   ).slice(0, 4);
 
+  const feeQuoteSource =
+    feeQuoteRaw ?? fallbackFeeQuote(listing.priceAmount, listing.priceToken);
+  const feeQuoteView = toTradeFeeQuoteView(feeQuoteSource);
+  const carrierLabelKey = selectedCarrier
+    ? CARRIER_LABEL_KEYS[selectedCarrier]
+    : undefined;
+  const deliveryLabel = carrierLabelKey
+    ? t(locale, carrierLabelKey as Parameters<typeof t>[1])
+    : "—";
+
   return (
-    <div className="bg-background min-h-screen">
+    <div className="bg-background min-h-screen" data-ocid="listing-detail-page">
       <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
         {/* Breadcrumb */}
         <nav className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -639,23 +832,20 @@ export default function ListingDetailPage() {
                 </div>
               )}
               <div className="flex flex-wrap gap-2 pt-1">
-                {(listing as ListingCard & { isPromoted?: boolean }).isPromoted && (
+                {(listing as ListingCard & { isPromoted?: boolean })
+                  .isPromoted && (
                   <Badge className="gap-1 bg-amber-500/20 text-amber-700 border-amber-500/40">
                     <Sparkles className="h-3 w-3" />
                     Promoted
                   </Badge>
                 )}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={handleShareLink}
-                  data-ocid="share-listing-btn"
-                >
-                  <Share2 className="h-3.5 w-3.5" />
-                  {tl("detail.shareLink")}
-                </Button>
+                <ShareListingButton
+                  url={
+                    typeof window !== "undefined" ? window.location.href : ""
+                  }
+                  title={listing.title}
+                  label={tl("detail.shareLink")}
+                />
                 {!isOwner && <FavoriteButton listingId={listing.id} />}
                 {!isOwner && (
                   <ListingInquiryPanel listingId={listing.id} isOwner={false} />
@@ -711,8 +901,7 @@ export default function ListingDetailPage() {
                           <AlertDialogAction
                             onClick={() => reportMutation.mutate()}
                             disabled={
-                              reportMutation.isPending ||
-                              !reportReason.trim()
+                              reportMutation.isPending || !reportReason.trim()
                             }
                             data-ocid="report-submit-btn"
                           >
@@ -732,12 +921,13 @@ export default function ListingDetailPage() {
                   </AlertDialog>
                 )}
               </div>
-              {(listing.priceToken === TradeToken.ckUSDC ||
-                listing.priceToken === TradeToken.ckUSDT) && (
-                <p className="text-xs text-amber-600 dark:text-amber-400">
-                  {tl("detail.onChainEscrowBeta")}
-                </p>
-              )}
+              {platformFlags?.trustlessEscrowEnabled &&
+                (listing.priceToken === TradeToken.ckUSDC ||
+                  listing.priceToken === TradeToken.ckUSDT) && (
+                  <p className="text-xs text-emerald-700 dark:text-emerald-300">
+                    {tl("detail.onChainEscrowBeta")}
+                  </p>
+                )}
             </div>
 
             <Separator />
@@ -774,7 +964,7 @@ export default function ListingDetailPage() {
                       onClick={() =>
                         navigate({
                           to: "/listings/create",
-                          search: { edit: params.id },
+                          search: { edit: String(params.id) },
                         })
                       }
                       data-ocid="edit-listing-btn"
@@ -916,19 +1106,31 @@ export default function ListingDetailPage() {
               (listing as ListingCard & { status?: string }).status !==
                 "inactive" && (
                 <div className="flex flex-col gap-2 pt-2">
+                  {tradeCapCheck && (
+                    <TradeCapRequirementsPanel check={tradeCapCheck} />
+                  )}
                   <Button
                     className="w-full h-11 bg-accent text-accent-foreground hover:opacity-90 font-semibold text-base"
                     onClick={handleBuyNow}
+                    disabled={startTradeMutation.isPending || tradeCapBlocked}
                     data-ocid="buy-now"
                   >
                     {isAuthed ? (
-                      selectedCarrier ? (
+                      startTradeMutation.isPending ? (
+                        <span className="flex items-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          {tl("detail.startingTrade")}
+                        </span>
+                      ) : selectedCarrier ? (
                         tl("detail.proceedCheckout")
                       ) : (
                         tl("detail.selectShippingAndBuy")
                       )
                     ) : (
-                      <span className="flex items-center gap-2">
+                      <span
+                        className="flex items-center gap-2"
+                        data-ocid="buy-now-signin"
+                      >
                         <LogIn className="h-4 w-4" />
                         {tl("detail.signInToBuy")}
                       </span>
@@ -1003,6 +1205,26 @@ export default function ListingDetailPage() {
           </p>
         </div>
 
+        {listing.attributes && listing.attributes.length > 0 && (
+          <div className="bg-card border border-border rounded-lg p-5 space-y-3">
+            <h2 className="text-base font-semibold text-foreground">
+              {tl("create.categoryAttributes.title")}
+            </h2>
+            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {listing.attributes.map((attr) => (
+                <div key={attr.key}>
+                  <dt className="text-xs text-muted-foreground uppercase tracking-wide">
+                    {attr.key}
+                  </dt>
+                  <dd className="text-sm font-medium text-foreground">
+                    {attr.value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        )}
+
         {/* Shipping comparison */}
         {!isOwner && isAuthed && (
           <div
@@ -1022,12 +1244,18 @@ export default function ListingDetailPage() {
               <div className="mt-4 pt-4 border-t border-border">
                 <Button
                   className="w-full h-11 bg-accent text-accent-foreground hover:opacity-90 font-semibold"
-                  onClick={() =>
-                    navigate({ to: "/trades", search: { initiate: params.id } })
-                  }
+                  onClick={handleBuyNow}
+                  disabled={startTradeMutation.isPending}
                   data-ocid="proceed-checkout-btn"
                 >
-                  {tl("detail.proceedCheckout")}
+                  {startTradeMutation.isPending ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      {tl("detail.startingTrade")}
+                    </span>
+                  ) : (
+                    tl("detail.proceedCheckout")
+                  )}
                 </Button>
               </div>
             )}
@@ -1100,6 +1328,122 @@ export default function ListingDetailPage() {
           </div>
         )}
       </div>
+
+      <AlertDialog open={checkoutOpen} onOpenChange={setCheckoutOpen}>
+        <AlertDialogContent
+          className="bg-card border-border max-w-md"
+          data-ocid="buy-checkout-dialog"
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>{tl("detail.checkout.title")}</AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground">
+              {listing.title}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="space-y-3 py-2 text-sm" data-ocid="buy-fee-breakdown">
+            {tradeCapCheck && (
+              <TradeCapRequirementsPanel check={tradeCapCheck} />
+            )}
+            {feeQuoteLoading ? (
+              <p className="text-muted-foreground flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {tl("detail.checkout.loading")}
+              </p>
+            ) : (
+              <>
+                {!feeQuoteRaw && (
+                  <p className="text-xs text-amber-700 dark:text-amber-300">
+                    {tl("detail.checkout.unavailable")}
+                  </p>
+                )}
+                {feeQuoteSource.usesDefaultFeeBps && (
+                  <p className="text-xs text-muted-foreground">
+                    {tl("detail.checkout.defaultFeeNote")}
+                  </p>
+                )}
+                <dl className="space-y-2">
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">
+                      {tl("detail.checkout.itemPrice")}
+                    </dt>
+                    <dd className="font-medium text-foreground">
+                      {feeQuoteView.itemPriceFormatted}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">
+                      {tl("detail.checkout.platformFee").replace(
+                        "{percent}",
+                        feeQuoteView.feePercentLabel,
+                      )}
+                    </dt>
+                    <dd className="font-medium text-foreground">
+                      {feeQuoteView.platformFeeFormatted}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">
+                      {tl("detail.checkout.network")}
+                    </dt>
+                    <dd className="font-medium text-foreground">
+                      {formatTokenDisplay(listing.priceToken)}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">
+                      {tl("detail.checkout.delivery")}
+                    </dt>
+                    <dd className="font-medium text-foreground text-right">
+                      {deliveryLabel}
+                    </dd>
+                  </div>
+                  <Separator />
+                  <div className="flex justify-between gap-4 text-base">
+                    <dt className="font-semibold text-foreground">
+                      {tl("detail.checkout.total")}
+                    </dt>
+                    <dd className="font-bold text-accent">
+                      {feeQuoteView.totalFormatted}
+                    </dd>
+                  </div>
+                </dl>
+                <p className="text-xs text-muted-foreground">
+                  {tl("detail.checkout.fundsNotLocked")}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {tl("detail.checkout.manualNote")}
+                </p>
+              </>
+            )}
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-border">
+              {tl("detail.cancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-accent text-accent-foreground hover:opacity-90"
+              onClick={handleConfirmCheckout}
+              disabled={
+                startTradeMutation.isPending ||
+                feeQuoteLoading ||
+                tradeCapBlocked
+              }
+              data-ocid="buy-checkout-confirm"
+            >
+              {startTradeMutation.isPending ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {tl("detail.startingTrade")}
+                </span>
+              ) : (
+                tl("detail.checkout.confirm")
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -17,7 +17,7 @@ module {
   /// Used when no real API key is configured — test mode.
   public let NP_PLACEHOLDER_API_KEY : Text = "your_test_api_key_here";
   /// Cache TTL: 5 minutes in nanoseconds
-  public let CACHE_TTL_NS : Int = 300_000_000_000;
+  public let CACHE_TTL_NS : Nat = 300_000_000_000;
 
   // ─── Ukrposhta API constants ──────────────────────────────────────────────
 
@@ -551,6 +551,80 @@ module {
     };
   };
 
+  // ─── Nova Poshta TTN validation (E7.S3) ──────────────────────────────────
+
+  public let NP_TTN_MIN_LEN : Nat = 11;
+  public let NP_TTN_MAX_LEN : Nat = 14;
+
+  /// Validates Nova Poshta TTN format — digits only, 11–14 chars (LG-10 / E7.S3 AC 2).
+  public func isValidNpTtnFormat(ttn : Text) : Bool {
+    let len = ttn.size();
+    if (len < NP_TTN_MIN_LEN or len > NP_TTN_MAX_LEN) return false;
+    for (ch in ttn.toIter()) {
+      if (ch < '0' or ch > '9') return false;
+    };
+    true
+  };
+
+  /// Maps raw carrier status strings to canonical unified status values.
+  public func mapToUnifiedStatus(raw : Text) : Text {
+    let lower = raw.toLower();
+    if (
+      lower.contains(#text "delivered")
+      or raw.contains(#text "вручено")
+      or raw.contains(#text "Вручено")
+      or raw.contains(#text "доставлено")
+      or raw.contains(#text "Доставлено")
+    ) {
+      "delivered"
+    } else if (lower.contains(#text "out_for_delivery") or lower.contains(#text "кур") or lower.contains(#text "виїхав")) {
+      "out_for_delivery"
+    } else if (
+      lower.contains(#text "arrived")
+      or raw.contains(#text "Arrived")
+      or lower.contains(#text "на відділенні")
+      or raw.contains(#text "Прибув")
+      or lower.contains(#text "прибув")
+    ) {
+      "arrived_at_branch"
+    } else if (
+      lower.contains(#text "transit")
+      or raw.contains(#text "дорозі")
+      or raw.contains(#text "Дорозі")
+      or lower.contains(#text "транзит")
+      or lower.contains(#text "в дорозі")
+      or lower.contains(#text "пересилається")
+    ) {
+      "in_transit"
+    } else if (lower.contains(#text "return") or lower.contains(#text "повернення")) {
+      "returned"
+    } else if (lower.contains(#text "exception") or lower.contains(#text "помилка")) {
+      "exception"
+    } else {
+      "created"
+    }
+  };
+
+  public func isNpDeliveredStatus(unifiedStatus : Text) : Bool {
+    unifiedStatus == "delivered"
+  };
+
+  public func isNpArrivedAtBranchStatus(unifiedStatus : Text) : Bool {
+    unifiedStatus == "arrived_at_branch"
+  };
+
+  /// True when NP tracking API response indicates the TTN is known to the carrier.
+  public func carrierAcceptsTtn(json : Text) : Bool {
+    if (not isSuccess(json)) return false;
+    switch (parseNovaPoshtaTrackingResponse(json)) {
+      case (?status) {
+        let unified = mapToUnifiedStatus(status);
+        unified != "exception"
+      };
+      case null false;
+    }
+  };
+
   // ─── Mock responses (when no API key is configured) ──────────────────────
 
   /// Returns a realistic mock cost response when no API key is configured.
@@ -621,8 +695,27 @@ module {
 
   /// Check if a cache entry (value, storedAt) is still fresh.
   public func isCacheFresh(storedAt : Types.Timestamp) : Bool {
-    let now = Time.now();
+    let now = Types.now();
     (now - storedAt) < CACHE_TTL_NS
+  };
+
+  let MAX_TRACKING_CACHE_ENTRIES : Nat = 1_000;
+
+  func evictOneTrackingCacheEntry(cache : Map.Map<Text, (Text, Types.Timestamp)>) {
+    var removed = false;
+    let now = Types.now();
+    for ((key, (_, storedAt)) in cache.entries()) {
+      if (not removed and now - storedAt >= CACHE_TTL_NS) {
+        cache.remove(key);
+        removed := true;
+      };
+    };
+    if (not removed) {
+      label first for ((key, _) in cache.entries()) {
+        cache.remove(key);
+        break first;
+      };
+    };
   };
 
   /// Look up a cached tracking result; returns null if missing or stale.
@@ -644,7 +737,10 @@ module {
     trackingNumber : Text,
     status         : Text,
   ) : () {
-    cache.add(trackingNumber, (status, Time.now()));
+    if (cache.size() >= MAX_TRACKING_CACHE_ENTRIES) {
+      evictOneTrackingCacheEntry(cache);
+    };
+    cache.add(trackingNumber, (status, Types.now()));
   };
 
   // ─── Nova Poshta branch / city / TTN request builders ───────────────────

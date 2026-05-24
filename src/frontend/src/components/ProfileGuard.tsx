@@ -1,5 +1,5 @@
 import { useActor } from "@caffeineai/core-infrastructure";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Loader2, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -25,10 +25,20 @@ interface ProfileGuardProps {
  * Public routes like /, /listings, /listings/:id do NOT use this guard.
  */
 export function ProfileGuard({ children }: ProfileGuardProps) {
-  const { isAuthenticated, isInitializing } = useAuth();
+  const { isAuthenticated, isInitializing, principal } = useAuth();
   const { actor, isFetching } = useActor(createActor);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [isTimedOut, setIsTimedOut] = useState(false);
+
+  const principalKey = principal?.toText() ?? "anon";
+
+  const retryProfile = () => {
+    setIsTimedOut(false);
+    void queryClient.invalidateQueries({
+      queryKey: ["myProfile", principalKey],
+    });
+  };
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const {
@@ -38,7 +48,7 @@ export function ProfileGuard({ children }: ProfileGuardProps) {
     isError: isProfileError,
     isSuccess: isProfileSuccess,
   } = useQuery({
-    queryKey: ["myProfile"],
+    queryKey: ["myProfile", principalKey],
     queryFn: async () => {
       if (!actor) return null;
       return actor.getMyProfile();
@@ -115,7 +125,7 @@ export function ProfileGuard({ children }: ProfileGuardProps) {
         </p>
         <button
           type="button"
-          onClick={() => window.location.reload()}
+          onClick={retryProfile}
           className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
           data-ocid="profile-guard.refresh_button"
         >
@@ -142,7 +152,7 @@ export function ProfileGuard({ children }: ProfileGuardProps) {
         </p>
         <button
           type="button"
-          onClick={() => window.location.reload()}
+          onClick={retryProfile}
           className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
           data-ocid="profile-guard.timeout_refresh_button"
         >

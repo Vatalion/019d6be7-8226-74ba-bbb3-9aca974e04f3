@@ -1,7 +1,7 @@
 import { createActor } from "@/backend";
-import type { ListingCard } from "@/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { asEngagementActor } from "@/lib/engagementActor";
+import type { ListingCard } from "@/types";
 import { useActor } from "@caffeineai/core-infrastructure";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -43,7 +43,10 @@ export default function FavoritesPage() {
               type="button"
               className="card-elevated overflow-hidden text-left"
               onClick={() =>
-                navigate({ to: "/listings/$id", params: { id: String(listing.id) } })
+                navigate({
+                  to: "/listings/$id",
+                  params: { id: String(listing.id) },
+                })
               }
             >
               <div className="aspect-[4/3] bg-muted relative">

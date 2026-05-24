@@ -5,14 +5,14 @@ import Principal "mo:core/Principal";
 import Array "mo:core/Array";
 import Sha256 "Sha256";
 
-/// DigitalEncryption — deterministic XOR cipher for digital goods protection.
+/// DigitalEncryption — deterministic obfuscation for non-public delivery metadata.
 /// Key derivation: SHA-256(canisterId || salt) → 32-byte key.
-/// Encryption: XOR each plaintext byte with a repeating key byte (stream cipher).
+/// Encryption: XOR each plaintext byte with a repeating key byte.
 /// Encoding: hex-encode the ciphertext for safe Text storage.
-/// 
-/// Security note: XOR with a SHA-256-derived key provides confidentiality
-/// equivalent to a stream cipher for the access-controlled canister use case.
-/// Decryption gate is enforced at the application layer (buyer + #complete).
+///
+/// Security note: this is not a cryptographic secrecy boundary. The security
+/// boundary is the canister authorization gate plus client-side AES-GCM file
+/// encryption. Do not use this module for user passwords or long-term secrets.
 module {
 
   let HEX_CHARS : [Char] = ['0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'];

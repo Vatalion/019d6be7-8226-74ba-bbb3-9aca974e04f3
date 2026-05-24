@@ -1,7 +1,7 @@
 import {
+  type OlxCategoryNode,
   categoryLabel,
   getL1Categories,
-  type OlxCategoryNode,
 } from "@/data/olxCategories";
 import { useLocale } from "@/hooks/useLocale";
 import { Link } from "@tanstack/react-router";

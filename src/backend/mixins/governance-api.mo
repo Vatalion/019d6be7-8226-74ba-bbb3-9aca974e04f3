@@ -1,8 +1,11 @@
 import Map "mo:core/Map";
 import List "mo:core/List";
+import Principal "mo:core/Principal";
+import Runtime "mo:core/Runtime";
 import Types "../types";
 import GovernanceLib "../lib/Governance";
 import TreasuryLib "../lib/Treasury";
+import InsuranceReserve "../lib/InsuranceReserve";
 import Admin "../lib/Admin";
 
 /// Governance mixin — exposes the public DAO governance endpoints to the actor.
@@ -15,6 +18,9 @@ mixin (
   treasuryWithdrawals : List.List<TreasuryLib.WithdrawalRecord>,
   nextWithdrawalId    : { var value : Nat },
   systemSettings      : Admin.SystemSettings,
+  insuranceLedger     : { var value : Nat },
+  insuranceAccruals   : Map.Map<Types.TradeId, InsuranceReserve.AccrualRecord>,
+  selfPrincipal       : { var value : Principal },
 ) {
 
   // ─── Create proposal ──────────────────────────────────────────────────────
@@ -82,7 +88,17 @@ mixin (
     amount  : Nat,
     token   : Types.TradeToken,
   ) : async () {
+    if (not Principal.equal(caller, selfPrincipal.value)) {
+      Runtime.trap("unauthorized: recordTreasuryFee is internal only");
+    };
     TreasuryLib.recordFee(treasuryFees, tradeId, amount, token);
+    ignore InsuranceReserve.accrueFromPlatformFee(
+      insuranceLedger,
+      insuranceAccruals,
+      tradeId,
+      amount,
+      token,
+    );
   };
 
   // ─── Queries ──────────────────────────────────────────────────────────────

@@ -1,4 +1,9 @@
-import type { DisputeId, MediaAttachment, TradeId } from "@/backend.d";
+import type {
+  DisputeEvidencePack,
+  DisputeId,
+  MediaAttachment,
+  TradeId,
+} from "@/backend.d";
 import { DisputeReason } from "@/backend.d";
 import { Button } from "@/components/ui/button";
 import {
@@ -8,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -31,14 +37,9 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
-// ─── Constants ─────────────────────────────────────────────────────────────
-
-// UI labels are mapped to valid backend DisputeReason values.
-// "not_shipped" → item_not_received (closest backend equivalent)
-// "payment_issue" → other (no dedicated backend value)
 const REASON_KEYS: { value: DisputeReason; uiKey: string; labelKey: string }[] =
   [
     {
@@ -52,9 +53,9 @@ const REASON_KEYS: { value: DisputeReason; uiKey: string; labelKey: string }[] =
       labelKey: "dispute.reason.notShipped",
     },
     {
-      value: DisputeReason.other,
-      uiKey: "payment_issue",
-      labelKey: "dispute.reason.payment",
+      value: DisputeReason.item_damaged,
+      uiKey: "item_damaged",
+      labelKey: "dispute.reason.itemDamaged",
     },
     {
       value: DisputeReason.other,
@@ -65,9 +66,8 @@ const REASON_KEYS: { value: DisputeReason; uiKey: string; labelKey: string }[] =
 
 const MAX_EVIDENCE = 5;
 const MAX_DESC = 1000;
+const MIN_PHOTOS = 2;
 const ACCEPTED_TYPES = "image/*,video/*,.pdf,.doc,.docx";
-
-// ─── Types ──────────────────────────────────────────────────────────────────
 
 type EvidenceStatus = "uploading" | "done" | "error";
 
@@ -79,46 +79,65 @@ interface EvidenceFile {
   attachment?: MediaAttachment;
   previewUrl?: string;
   errorMessage?: string;
+  role?: "ttn" | "package";
 }
 
 interface DisputeModalProps {
   open: boolean;
   onClose: () => void;
   tradeId: TradeId;
+  tradeKind: "physical" | "digital";
+  digitalFileHash?: string | null;
+  downloadTimestamp?: bigint | null;
 }
 
-// ─── Helper ─────────────────────────────────────────────────────────────────
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-// ─── Component ──────────────────────────────────────────────────────────────
-
-export function DisputeModal({ open, onClose, tradeId }: DisputeModalProps) {
+export function DisputeModal({
+  open,
+  onClose,
+  tradeId,
+  tradeKind,
+  digitalFileHash,
+  downloadTimestamp,
+}: DisputeModalProps) {
   const { actor } = useBackend();
   const { identity } = useAuth();
   const { uploadFile } = useUploadFile(identity);
   const { t: tl } = useLocale();
   const qc = useQueryClient();
 
+  const isPhysical = tradeKind === "physical";
+
   const [reason, setReason] = useState<string>(REASON_KEYS[0].uiKey);
   const [description, setDescription] = useState("");
+  const [chatThreadLink, setChatThreadLink] = useState("");
   const [evidenceFiles, setEvidenceFiles] = useState<EvidenceFile[]>([]);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const nextId = useRef(0);
   const evidenceInputRef = useRef<HTMLInputElement>(null);
+  const uploadRoleRef = useRef<"ttn" | "package">("package");
 
-  // ── Upload handler ────────────────────────────────────────────────────────
+  const packagePhotoCount = useMemo(
+    () =>
+      evidenceFiles.filter(
+        (e) => e.status === "done" && (e.role === "package" || !e.role),
+      ).length,
+    [evidenceFiles],
+  );
+
+  const ttnScreenshotUrl = useMemo(() => {
+    const ttn = evidenceFiles.find(
+      (e) => e.role === "ttn" && e.status === "done",
+    );
+    return ttn?.attachment?.url ?? null;
+  }, [evidenceFiles]);
 
   const handleFiles = useCallback(
-    (files: FileList | File[]) => {
+    (files: FileList | File[], role: "ttn" | "package" = "package") => {
       const fileArray = Array.from(files);
       const remaining = MAX_EVIDENCE - evidenceFiles.length;
       if (remaining <= 0) {
-        toast.warning(`Maximum ${MAX_EVIDENCE} evidence files allowed`);
+        toast.warning(tl("dispute.evidence.maxFiles"));
         return;
       }
       const toUpload = fileArray.slice(0, remaining);
@@ -129,13 +148,11 @@ export function DisputeModal({ open, onClose, tradeId }: DisputeModalProps) {
           ? URL.createObjectURL(file)
           : undefined;
 
-        // Add placeholder entry immediately
         setEvidenceFiles((prev) => [
           ...prev,
-          { id, file, progress: 0, status: "uploading", previewUrl },
+          { id, file, progress: 0, status: "uploading", previewUrl, role },
         ]);
 
-        // Start upload
         uploadFile(file, (pct) => {
           setEvidenceFiles((prev) =>
             prev.map((e) => (e.id === id ? { ...e, progress: pct } : e)),
@@ -163,57 +180,91 @@ export function DisputeModal({ open, onClose, tradeId }: DisputeModalProps) {
                 e.id === id ? { ...e, status: "error", errorMessage: msg } : e,
               ),
             );
-            toast.error(`Failed to upload evidence: ${msg}`);
           });
       }
     },
-    [evidenceFiles.length, uploadFile],
+    [evidenceFiles.length, uploadFile, tl],
   );
 
-  // ── Drag & drop ───────────────────────────────────────────────────────────
-
-  const onDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  }, []);
-
-  const onDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-  }, []);
-
-  const onDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      setIsDragging(false);
-      if (e.dataTransfer.files.length > 0) {
-        handleFiles(e.dataTransfer.files);
+  const validateForm = useCallback((): string[] => {
+    const errors: string[] = [];
+    if (description.trim().length < 20) {
+      errors.push(tl("dispute.validation.descriptionMin"));
+    }
+    if (isPhysical) {
+      if (!ttnScreenshotUrl) errors.push(tl("dispute.validation.ttnRequired"));
+      if (packagePhotoCount < MIN_PHOTOS) {
+        errors.push(tl("dispute.validation.photosMin"));
       }
-    },
-    [handleFiles],
-  );
+      if (!chatThreadLink.trim()) {
+        errors.push(tl("dispute.validation.chatLinkRequired"));
+      }
+    } else {
+      if (!digitalFileHash) errors.push(tl("dispute.validation.hashRequired"));
+      if (downloadTimestamp == null) {
+        errors.push(tl("dispute.validation.downloadTsRequired"));
+      }
+    }
+    return errors;
+  }, [
+    chatThreadLink,
+    description,
+    digitalFileHash,
+    downloadTimestamp,
+    isPhysical,
+    packagePhotoCount,
+    tl,
+    ttnScreenshotUrl,
+  ]);
 
-  const removeEvidence = useCallback((id: number) => {
-    setEvidenceFiles((prev) => {
-      const item = prev.find((e) => e.id === id);
-      if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl);
-      return prev.filter((e) => e.id !== id);
-    });
-  }, []);
+  const buildEvidencePack = useCallback((): DisputeEvidencePack => {
+    const photoUrls = evidenceFiles
+      .filter((e) => e.status === "done" && e.role !== "ttn" && e.attachment)
+      .map((e) => e.attachment!.url);
 
-  // ── Submit ────────────────────────────────────────────────────────────────
+    if (isPhysical) {
+      return {
+        ttnScreenshotUrl: ttnScreenshotUrl || undefined,
+        packagePhotoUrls: photoUrls,
+        chatThreadLink: chatThreadLink.trim() || undefined,
+        fileHash: undefined,
+        downloadTimestamp: 0n,
+      };
+    }
+    return {
+      ttnScreenshotUrl: undefined,
+      packagePhotoUrls: [],
+      chatThreadLink: undefined,
+      fileHash: digitalFileHash ?? undefined,
+      downloadTimestamp: downloadTimestamp ?? 0n,
+    };
+  }, [
+    chatThreadLink,
+    digitalFileHash,
+    downloadTimestamp,
+    evidenceFiles,
+    isPhysical,
+    ttnScreenshotUrl,
+  ]);
 
   const { mutate, isPending } = useMutation({
     mutationFn: async () => {
-      // Resolve backend DisputeReason from UI key
+      const errors = validateForm();
+      if (errors.length > 0) {
+        setValidationErrors(errors);
+        throw new Error("validation");
+      }
+      setValidationErrors([]);
+
       const backendReason =
         REASON_KEYS.find((r) => r.uiKey === reason)?.value ??
         DisputeReason.other;
-      // Step 1 — open the dispute
+
       const res = await actor!.openDispute(
         tradeId,
         backendReason,
         description.trim(),
+        buildEvidencePack(),
       );
       if (
         handleResultError(
@@ -222,26 +273,8 @@ export function DisputeModal({ open, onClose, tradeId }: DisputeModalProps) {
       ) {
         throw new Error("handled");
       }
-
       if (!("ok" in res)) throw new Error("Unexpected response");
-      const disputeId = (res as { ok: DisputeId }).ok;
-
-      // Step 2 — attach evidence files (best-effort)
-      const readyAttachments = evidenceFiles
-        .filter((e) => e.status === "done" && e.attachment)
-        .map((e) => e.attachment!);
-
-      if (readyAttachments.length > 0 && actor) {
-        try {
-          await actor.addEvidence(disputeId, readyAttachments);
-        } catch (evidenceErr) {
-          // Evidence failure should NOT block dispute creation
-          console.error("[DisputeModal] addEvidence failed:", evidenceErr);
-          toast.warning(
-            "Dispute opened, but some evidence files could not be attached.",
-          );
-        }
-      }
+      return (res as { ok: DisputeId }).ok;
     },
     onSuccess: () => {
       toast.success(tl("dispute.openedMessage"));
@@ -249,6 +282,7 @@ export function DisputeModal({ open, onClose, tradeId }: DisputeModalProps) {
       onClose();
     },
     onError: (e) => {
+      if ((e as Error).message === "validation") return;
       if ((e as Error).message === "handled") return;
       toast.error(`Failed to open dispute: ${(e as Error).message}`);
     },
@@ -276,12 +310,24 @@ export function DisputeModal({ open, onClose, tradeId }: DisputeModalProps) {
             <DialogTitle>{tl("dispute.form.title")}</DialogTitle>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
-            {tl("dispute.openedMessage")}
+            {isPhysical
+              ? tl("dispute.playbook.physicalHint")
+              : tl("dispute.playbook.digitalHint")}
           </p>
         </DialogHeader>
 
         <div className="space-y-5 py-2">
-          {/* Reason */}
+          {validationErrors.length > 0 && (
+            <ul
+              className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive space-y-1"
+              data-ocid="dispute-validation-errors"
+            >
+              {validationErrors.map((msg) => (
+                <li key={msg}>{msg}</li>
+              ))}
+            </ul>
+          )}
+
           <div className="space-y-1.5">
             <Label htmlFor="dispute-reason">{tl("dispute.form.reason")}</Label>
             <Select value={reason} onValueChange={(v) => setReason(v)}>
@@ -301,25 +347,17 @@ export function DisputeModal({ open, onClose, tradeId }: DisputeModalProps) {
             </Select>
           </div>
 
-          {/* Description */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <Label htmlFor="dispute-desc">
                 {tl("dispute.form.description")}
               </Label>
-              <span
-                className={
-                  description.length > MAX_DESC
-                    ? "text-xs text-destructive"
-                    : "text-xs text-muted-foreground"
-                }
-              >
+              <span className="text-xs text-muted-foreground">
                 {description.length}/{MAX_DESC}
               </span>
             </div>
             <Textarea
               id="dispute-desc"
-              placeholder="Describe what happened in detail (min. 20 characters)…"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               className="resize-none"
@@ -329,15 +367,58 @@ export function DisputeModal({ open, onClose, tradeId }: DisputeModalProps) {
             />
           </div>
 
-          {/* Evidence Upload */}
-          <div className="space-y-2">
-            <Label>Evidence Files</Label>
-            <p className="text-xs text-muted-foreground">
-              Upload up to {MAX_EVIDENCE} photos, videos, or documents as
-              evidence
-            </p>
+          {isPhysical ? (
+            <>
+              <div className="space-y-2">
+                <Label>{tl("dispute.evidence.ttn")}</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    uploadRoleRef.current = "ttn";
+                    evidenceInputRef.current?.click();
+                  }}
+                >
+                  {tl("dispute.evidence.uploadTtn")}
+                </Button>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="dispute-chat-link">
+                  {tl("dispute.evidence.chatLink")}
+                </Label>
+                <Input
+                  id="dispute-chat-link"
+                  value={chatThreadLink}
+                  onChange={(e) => setChatThreadLink(e.target.value)}
+                  placeholder="https://…"
+                  data-ocid="dispute-chat-link"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>
+                  {tl("dispute.evidence.packagePhotos")} ({packagePhotoCount}/
+                  {MIN_PHOTOS}+)
+                </Label>
+              </div>
+            </>
+          ) : (
+            <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm space-y-2">
+              <p>
+                <span className="text-muted-foreground">
+                  {tl("dispute.evidence.fileHash")}:{" "}
+                </span>
+                <span className="font-mono text-xs break-all">
+                  {digitalFileHash ?? "—"}
+                </span>
+              </p>
+              <p className="text-muted-foreground text-xs">
+                {tl("dispute.playbook.digitalInspectionNote")}
+              </p>
+            </div>
+          )}
 
-            {/* Hidden file input */}
+          <div className="space-y-2">
             <input
               ref={evidenceInputRef}
               type="file"
@@ -347,14 +428,12 @@ export function DisputeModal({ open, onClose, tradeId }: DisputeModalProps) {
               data-ocid="dispute-evidence-input"
               onChange={(e) => {
                 if (e.target.files && e.target.files.length > 0) {
-                  handleFiles(e.target.files);
+                  handleFiles(e.target.files, uploadRoleRef.current);
                   e.target.value = "";
                 }
               }}
             />
-
-            {/* Drop zone */}
-            {evidenceFiles.length < MAX_EVIDENCE && (
+            {isPhysical && evidenceFiles.length < MAX_EVIDENCE && (
               <button
                 type="button"
                 data-ocid="dispute-evidence-dropzone"
@@ -364,35 +443,41 @@ export function DisputeModal({ open, onClose, tradeId }: DisputeModalProps) {
                     ? "border-primary bg-primary/5"
                     : "border-border hover:border-primary/50 hover:bg-muted/30",
                 ].join(" ")}
-                onClick={() => evidenceInputRef.current?.click()}
-                onDragOver={onDragOver}
-                onDragLeave={onDragLeave}
-                onDrop={onDrop}
-                aria-label="Upload evidence files"
+                onClick={() => {
+                  uploadRoleRef.current = "package";
+                  evidenceInputRef.current?.click();
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDragging(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  setIsDragging(false);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDragging(false);
+                  uploadRoleRef.current = "package";
+                  if (e.dataTransfer.files.length > 0) {
+                    handleFiles(e.dataTransfer.files, "package");
+                  }
+                }}
               >
                 <Upload className="w-5 h-5 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground text-center">
-                  Drop evidence files here or{" "}
-                  <span className="text-primary font-medium">
-                    click to select
-                  </span>
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Images, videos, PDF, DOC • max 25 MB each
+                  {tl("dispute.evidence.dropHint")}
                 </p>
               </button>
             )}
 
-            {/* Evidence preview list */}
             {evidenceFiles.length > 0 && (
               <div className="space-y-2 mt-2">
                 {evidenceFiles.map((item) => (
                   <div
                     key={item.id}
-                    data-ocid="dispute-evidence-item"
                     className="flex items-start gap-3 rounded-lg border border-border bg-muted/20 p-2"
                   >
-                    {/* Thumbnail or icon */}
                     <div className="flex-shrink-0 w-12 h-12 rounded overflow-hidden bg-muted flex items-center justify-center">
                       {item.previewUrl ? (
                         <img
@@ -406,46 +491,32 @@ export function DisputeModal({ open, onClose, tradeId }: DisputeModalProps) {
                         <FileIcon className="w-5 h-5 text-muted-foreground" />
                       )}
                     </div>
-
-                    {/* Info + progress */}
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">
-                        {item.file.name}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {formatBytes(item.file.size)}
+                        {item.role === "ttn"
+                          ? tl("dispute.evidence.ttn")
+                          : item.file.name}
                       </p>
                       {item.status === "uploading" && (
-                        <div className="mt-1.5">
-                          <Progress value={item.progress} className="h-1.5" />
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            {item.progress}%
-                          </p>
-                        </div>
-                      )}
-                      {item.status === "done" && (
-                        <p className="text-xs text-green-600 mt-1">
-                          Uploaded ✓
-                        </p>
-                      )}
-                      {item.status === "error" && (
-                        <p className="text-xs text-destructive mt-1 truncate">
-                          {item.errorMessage ?? "Upload failed"}
-                        </p>
+                        <Progress
+                          value={item.progress}
+                          className="h-1.5 mt-1"
+                        />
                       )}
                     </div>
-
-                    {/* Remove button */}
                     {!isPending && (
                       <Button
                         type="button"
                         variant="ghost"
                         size="icon"
-                        className="flex-shrink-0 h-7 w-7"
-                        onClick={() => removeEvidence(item.id)}
-                        aria-label="Remove evidence file"
+                        className="h-7 w-7"
+                        onClick={() =>
+                          setEvidenceFiles((prev) =>
+                            prev.filter((e) => e.id !== item.id),
+                          )
+                        }
                       >
-                        <X className="w-3.5 h-3.5 text-muted-foreground" />
+                        <X className="w-3.5 h-3.5" />
                       </Button>
                     )}
                   </div>
@@ -461,7 +532,6 @@ export function DisputeModal({ open, onClose, tradeId }: DisputeModalProps) {
             variant="outline"
             onClick={onClose}
             disabled={isPending}
-            data-ocid="dispute-cancel-btn"
           >
             {tl("detail.cancel")}
           </Button>
@@ -472,11 +542,7 @@ export function DisputeModal({ open, onClose, tradeId }: DisputeModalProps) {
             onClick={() => mutate()}
             data-ocid="dispute-submit-btn"
           >
-            {isPending
-              ? tl("jurors.submitting")
-              : hasUploading
-                ? tl("chat.uploading")
-                : tl("dispute.form.title")}
+            {isPending ? tl("jurors.submitting") : tl("dispute.form.submit")}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -1,3 +1,8 @@
+import {
+  CategoryAttributeFields,
+  toAttributePayload,
+} from "@/components/marketplace/CategoryAttributeFields";
+import { CategoryPicker } from "@/components/marketplace/CategoryPicker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,9 +16,18 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  categoryLabel,
+  getCategoryById,
+  legacyToListingCategoryKey,
+} from "@/data/olxCategories";
+import {
+  categoryIdArg,
+  fetchCategoryAttributeSchema,
+} from "@/lib/marketplaceActor";
 import { useActor, useInternetIdentity } from "@caffeineai/core-infrastructure";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import {
   AlertCircle,
   ArrowLeft,
@@ -21,7 +35,6 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  Copy,
   DollarSign,
   GripVertical,
   ImagePlus,
@@ -29,11 +42,10 @@ import {
   Lock,
   LogIn,
   Package,
-  RefreshCw,
   Upload,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { createActor } from "../backend";
 import { ItemCondition, ListingCategory, TradeToken } from "../backend.d";
@@ -49,20 +61,32 @@ import { CascadingLocationPicker } from "../components/CascadingLocationPicker";
 import { NetworkSelectionDialog } from "../components/NetworkSelectionDialog";
 import { ShippingProviderSelector } from "../components/shared/ShippingProviderSelector";
 import { useAuth } from "../hooks/useAuth";
-import { useUploadFile } from "../hooks/useBackend";
-import { useLocale } from "../hooks/useLocale";
-import { CategoryPicker } from "@/components/marketplace/CategoryPicker";
 import {
-  categoryLabel,
-  getCategoryById,
-  legacyToListingCategoryKey,
-} from "@/data/olxCategories";
-import { asMarketplaceActor, optNat } from "@/lib/marketplaceActor";
+  registerDigitalFileOnListing,
+  useUploadFile,
+} from "../hooks/useBackend";
+import { useLocale } from "../hooks/useLocale";
 import { detectLocale, t } from "../i18n";
 import {
   ACTIVE_PHYSICAL_SHIPPING_CARRIER,
   getPhysicalShippingMethods,
 } from "../lib/deliveryPolicy";
+import {
+  encryptDigitalFile,
+  validateDigitalFile,
+} from "../lib/digitalFileCrypto";
+import {
+  chainAmountToDisplayPrice,
+  formatStakeMicros,
+  listingPriceToChainAmount,
+  requiredListingStakeMicros,
+} from "../lib/listingStake";
+import { resolveBackendCanisterId } from "../lib/resolveBackendCanisterId";
+import {
+  depositListingStake,
+  fetchMyStakeBalance,
+  publishDraftListing,
+} from "../lib/stakeClient";
 import type { ListingCard } from "../types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -85,6 +109,7 @@ interface FormState {
   title: string;
   category: ListingCategory | "";
   categoryId: number | null;
+  categoryAttributes: Record<string, string>;
   condition: ItemCondition | "";
   description: string;
   isDigital: boolean;
@@ -592,13 +617,16 @@ function PhotoZone({
   );
 }
 
+const createListingRouteApi = getRouteApi("/listings/create");
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function CreateListingPage() {
   const { identity, isInitializing } = useInternetIdentity();
   const { isAuthenticated, principal } = useAuth();
   const { actor, isFetching } = useActor(createActor);
-  const { uploadFile } = useUploadFile(identity);
+  const { uploadFile, uploadFileWithHash } = useUploadFile(identity);
+  const [digitalUploadFile, setDigitalUploadFile] = useState<File | null>(null);
   const isAuthenticatedRef = useRef(isAuthenticated);
   isAuthenticatedRef.current = isAuthenticated;
   const queryClient = useQueryClient();
@@ -634,8 +662,7 @@ export default function CreateListingPage() {
     },
   ];
 
-  const params = new URLSearchParams(window.location.search);
-  const editId = params.get("edit");
+  const { edit: editId } = createListingRouteApi.useSearch();
   const isEditMode = Boolean(editId);
 
   const [step, setStep] = useState(0);
@@ -651,6 +678,10 @@ export default function CreateListingPage() {
     "USDT",
   );
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
+  const [isDepositingStake, setIsDepositingStake] = useState(false);
+  const [backendCanisterId, setBackendCanisterId] = useState<string | null>(
+    null,
+  );
   const [editLoadError, setEditLoadError] = useState<
     "notOwner" | "loadError" | null
   >(null);
@@ -659,6 +690,7 @@ export default function CreateListingPage() {
     title: "",
     category: "",
     categoryId: null,
+    categoryAttributes: {},
     condition: "",
     description: "",
     isDigital: false,
@@ -688,6 +720,41 @@ export default function CreateListingPage() {
     meestSenderPudoRef: "",
   });
 
+  const requiredStakeMicros = useMemo(() => {
+    const priceAmt = listingPriceToChainAmount(
+      form.priceAmount,
+      form.priceToken,
+    );
+    if (priceAmt === null) return null;
+    return requiredListingStakeMicros(priceAmt, form.priceToken);
+  }, [form.priceAmount, form.priceToken]);
+
+  const { data: stakeBalance, refetch: refetchStakeBalance } = useQuery({
+    queryKey: ["stakeBalance", form.priceToken, principal?.toText()],
+    queryFn: async () => {
+      if (
+        !identity ||
+        identity.getPrincipal().isAnonymous() ||
+        !backendCanisterId
+      ) {
+        return null;
+      }
+      return fetchMyStakeBalance(backendCanisterId, identity, form.priceToken);
+    },
+    enabled:
+      !isEditMode &&
+      !!identity &&
+      !identity.getPrincipal().isAnonymous() &&
+      !!backendCanisterId &&
+      step >= 1,
+  });
+
+  const stakeShortfall = useMemo(() => {
+    if (requiredStakeMicros === null || !stakeBalance) return null;
+    if (stakeBalance.available >= requiredStakeMicros) return 0n;
+    return requiredStakeMicros - stakeBalance.available;
+  }, [requiredStakeMicros, stakeBalance]);
+
   const {
     data: existingListing,
     isLoading: isLoadingListing,
@@ -701,6 +768,19 @@ export default function CreateListingPage() {
     enabled: !!actor && !isFetching && isEditMode,
   });
 
+  const [attributeErrors, setAttributeErrors] = useState<
+    Record<string, string>
+  >({});
+
+  const { data: attributeSchema } = useQuery({
+    queryKey: ["categoryAttributeSchema", form.categoryId, actor],
+    queryFn: () =>
+      form.categoryId != null && actor
+        ? fetchCategoryAttributeSchema(actor, form.categoryId)
+        : Promise.resolve([]),
+    enabled: form.categoryId != null && form.categoryId > 0 && !!actor,
+  });
+
   // ── When edit mode listing loads as null → show load error ────────────────
   useEffect(() => {
     if (isEditMode && isListingLoaded && existingListing === null) {
@@ -708,7 +788,14 @@ export default function CreateListingPage() {
     }
   }, [isEditMode, isListingLoaded, existingListing]);
 
-  // ── Liability check: block listing creation if seller has >$100 negative balance ──
+  useEffect(() => {
+    resolveBackendCanisterId()
+      .then((id) => {
+        if (id) setBackendCanisterId(id);
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     if (!actor || !principal || isFetching) return;
     actor
@@ -787,7 +874,10 @@ export default function CreateListingPage() {
       digitalFileHash: "",
       digitalPassword: "",
       digitalPasswordEnabled: false,
-      priceAmount: existingListing.priceAmount.toString(),
+      priceAmount: chainAmountToDisplayPrice(
+        existingListing.priceAmount,
+        existingListing.priceToken,
+      ),
       priceToken: existingListing.priceToken,
       location: existingListing.location,
       shippingWeightKg: "1",
@@ -1089,20 +1179,29 @@ export default function CreateListingPage() {
 
   const validateStep = (s: number): boolean => {
     const errs: ValidationErrors = {};
+    let attrErrs: Record<string, string> = {};
     if (s === 0) {
       if (!form.title.trim()) errs.title = tl("create.validation.title");
       else if (form.title.trim().length < MIN_TITLE)
         errs.title = t(locale, "validation.title.min");
       else if (form.title.length > MAX_TITLE)
         errs.title = t(locale, "validation.title.max");
-      if (form.categoryId == null) errs.category = tl("create.validation.category");
+      if (form.categoryId == null)
+        errs.category = tl("create.validation.category");
       if (!form.condition) errs.condition = tl("create.validation.condition");
       if (!form.description.trim())
         errs.description = tl("create.validation.description");
       else if (form.description.length > MAX_DESC)
         errs.description = t(locale, "validation.description.max");
-      if (form.isDigital && !form.digitalFileUrl.trim())
-        errs.digitalFileUrl = tl("create.validation.digitalUrl");
+      if (form.isDigital && !digitalUploadFile && !form.digitalFileUrl.trim())
+        errs.digitalFileUrl = tl("create.validation.digitalFile");
+      const attrErrsLocal: Record<string, string> = {};
+      for (const field of attributeSchema ?? []) {
+        if (field.required && !form.categoryAttributes[field.key]?.trim()) {
+          attrErrsLocal[field.key] = tl("create.validation.requiredAttribute");
+        }
+      }
+      attrErrs = attrErrsLocal;
       // Package details validation (only if weight > 0 — optional section)
       if (form.packageWeight > 0) {
         if (form.packageWeight > 30)
@@ -1149,7 +1248,8 @@ export default function CreateListingPage() {
       }
     }
     setErrors(errs);
-    return Object.keys(errs).length === 0;
+    setAttributeErrors(attrErrs);
+    return Object.keys(errs).length === 0 && Object.keys(attrErrs).length === 0;
   };
 
   const handleNext = () => {
@@ -1180,6 +1280,35 @@ export default function CreateListingPage() {
   ) => {
     setSelectedCarrier(carrier);
     if (errors.carrier) setErrors((e) => ({ ...e, carrier: undefined }));
+  };
+
+  const handleDepositRequiredStake = async () => {
+    if (!identity || isDepositingStake || requiredStakeMicros === null) return;
+    const depositAmount =
+      stakeShortfall !== null && stakeShortfall > 0n
+        ? stakeShortfall
+        : requiredStakeMicros;
+    setIsDepositingStake(true);
+    try {
+      const result = await depositListingStake(
+        identity,
+        form.priceToken,
+        depositAmount,
+        backendCanisterId ?? undefined,
+      );
+      if ("err" in result) {
+        toast.error(tl("create.stake.depositBtn"), {
+          description: JSON.stringify(result.err),
+        });
+        return;
+      }
+      toast.success(tl("create.stake.depositOk"));
+      await refetchStakeBalance();
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setIsDepositingStake(false);
+    }
   };
 
   const handleSubmit = async () => {
@@ -1326,9 +1455,13 @@ export default function CreateListingPage() {
       const shippingMethodsPayload = form.isDigital
         ? []
         : getPhysicalShippingMethods();
-      const priceAmt = BigInt(
-        Math.round(Number.parseFloat(form.priceAmount) * 100),
+      const priceAmt = listingPriceToChainAmount(
+        form.priceAmount,
+        form.priceToken,
       );
+      if (priceAmt === null) {
+        throw new Error(tl("create.validation.price"));
+      }
 
       // Build optional package details payload
       const packageDetailsPayload: PackageDetailsType | null = null;
@@ -1350,13 +1483,12 @@ export default function CreateListingPage() {
 
       if (isEditMode && editId) {
         console.log("[CreateListing] calling actor.updateListing");
-        const mp = asMarketplaceActor(actor);
-        const res = await mp.updateListing(
+        const res = await actor.updateListing(
           BigInt(editId),
           form.title.trim(),
           form.description.trim(),
           form.category as ListingCategory,
-          optNat(form.categoryId),
+          categoryIdArg(form.categoryId),
           priceAmt,
           form.priceToken,
           form.condition as ItemCondition,
@@ -1367,15 +1499,12 @@ export default function CreateListingPage() {
           form.isDigital && form.digitalFileHash.trim()
             ? form.digitalFileHash.trim()
             : null,
-          form.isDigital &&
-            form.digitalPasswordEnabled &&
-            form.digitalPassword.trim()
-            ? form.digitalPassword.trim()
-            : null,
+          null,
           packageDetailsPayload,
           novaPoshtaConfigPayload,
           ukrposhtaConfigPayload,
           meestConfigPayload,
+          toAttributePayload(form.categoryAttributes),
         );
         console.log("[CreateListing] updateListing response:", res);
         if (isErr(res)) {
@@ -1421,12 +1550,11 @@ export default function CreateListingPage() {
         }
       } else {
         console.log("[CreateListing] calling actor.createListing");
-        const mp = asMarketplaceActor(actor);
-        const res = await mp.createListing(
+        const res = await actor.createListing(
           form.title.trim(),
           form.description.trim(),
           form.category as ListingCategory,
-          optNat(form.categoryId),
+          categoryIdArg(form.categoryId),
           priceAmt,
           form.priceToken,
           form.condition as ItemCondition,
@@ -1434,19 +1562,14 @@ export default function CreateListingPage() {
           form.location.trim(),
           shippingMethodsPayload,
           form.isDigital,
-          form.isDigital && form.digitalFileUrl ? form.digitalFileUrl : null,
-          form.isDigital && form.digitalFileHash.trim()
-            ? form.digitalFileHash.trim()
-            : null,
-          form.isDigital &&
-            form.digitalPasswordEnabled &&
-            form.digitalPassword.trim()
-            ? form.digitalPassword.trim()
-            : null,
+          null,
+          null,
+          null,
           packageDetailsPayload,
           novaPoshtaConfigPayload,
           ukrposhtaConfigPayload,
           meestConfigPayload,
+          toAttributePayload(form.categoryAttributes),
         );
         console.log("[CreateListing] createListing response:", res);
         if (isErr(res)) {
@@ -1468,6 +1591,8 @@ export default function CreateListingPage() {
               errDesc = tl("create.error.banned");
             } else if (kind === "rate_limited") {
               errDesc = tl("create.error.rateLimited");
+            } else if (kind === "insufficient_funds") {
+              errDesc = tl("create.stake.insufficient");
             } else if (kind === "invalid_input") {
               errDesc = String(
                 (errVariant as { invalid_input?: string }).invalid_input ??
@@ -1496,10 +1621,51 @@ export default function CreateListingPage() {
             okRes.ok.id,
           );
           setSubmitError(null);
-          toast.success(tl("create.published"));
+          if (
+            form.isDigital &&
+            digitalUploadFile &&
+            identity &&
+            backendCanisterId
+          ) {
+            const enc = await encryptDigitalFile(digitalUploadFile);
+            const cipherFile = new File(
+              [enc.encryptedBytes.slice()],
+              `${digitalUploadFile.name}.enc`,
+              { type: "application/octet-stream" },
+            );
+            const { url, hash } = await uploadFileWithHash(cipherFile);
+            await registerDigitalFileOnListing(
+              identity,
+              backendCanisterId,
+              okRes.ok.id,
+              hash,
+              enc.mimeType,
+              enc.sizeBytes,
+              url,
+              enc.dekHex,
+              enc.contentHash,
+            );
+            const publishResult = await publishDraftListing(
+              identity,
+              okRes.ok.id,
+              backendCanisterId,
+            );
+            if ("err" in publishResult) {
+              throw new Error(JSON.stringify(publishResult.err));
+            }
+          }
           await queryClient.invalidateQueries({ queryKey: ["myListings"] });
           const newId = okRes.ok.id.toString();
-          navigate({ to: "/listings/$id", params: { id: newId } });
+          if (okRes.ok.status === "draft") {
+            toast.info(tl("create.stake.draftSaved"), {
+              description: tl("create.stake.insufficient"),
+              duration: 10000,
+            });
+            navigate({ to: "/listings/create", search: { edit: newId } });
+          } else {
+            toast.success(tl("create.published"));
+            navigate({ to: "/listings/$id", params: { id: newId } });
+          }
         }
       }
     } catch (e) {
@@ -1595,7 +1761,10 @@ export default function CreateListingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div
+      className="min-h-screen bg-background"
+      data-ocid={isEditMode ? "edit-listing-form" : "create-listing-form"}
+    >
       <div className="max-w-2xl mx-auto px-4 py-8">
         <div className="mb-6">
           <h1
@@ -1683,7 +1852,9 @@ export default function CreateListingPage() {
                 </div>
 
                 <div className="space-y-2" data-ocid="select-category">
-                  <Label className="text-label">{tl("create.field.category")}</Label>
+                  <Label className="text-label">
+                    {tl("create.field.category")}
+                  </Label>
                   <CategoryPicker
                     valueId={form.categoryId}
                     allowAny={false}
@@ -1691,10 +1862,14 @@ export default function CreateListingPage() {
                       setForm((f) => ({
                         ...f,
                         categoryId: id,
+                        categoryAttributes: {},
                         category: node
-                          ? (legacyToListingCategoryKey(node.legacy) as ListingCategory)
+                          ? (legacyToListingCategoryKey(
+                              node.legacy,
+                            ) as ListingCategory)
                           : "",
-                        isDigital: node?.slug.includes("tsifrovye") ?? f.isDigital,
+                        isDigital:
+                          node?.slug.includes("tsifrovye") ?? f.isDigital,
                       }));
                     }}
                   />
@@ -1705,6 +1880,22 @@ export default function CreateListingPage() {
                     </p>
                   )}
                 </div>
+
+                <CategoryAttributeFields
+                  categoryId={form.categoryId}
+                  values={form.categoryAttributes}
+                  errors={attributeErrors}
+                  actor={actor}
+                  onChange={(key, value) =>
+                    setForm((f) => ({
+                      ...f,
+                      categoryAttributes: {
+                        ...f.categoryAttributes,
+                        [key]: value,
+                      },
+                    }))
+                  }
+                />
 
                 <div className="space-y-2">
                   <Label className="text-label">
@@ -1802,26 +1993,52 @@ export default function CreateListingPage() {
                 {form.isDigital && (
                   <div className="space-y-4">
                     <div className="space-y-2">
-                      <Label htmlFor="digitalFileUrl" className="text-label">
-                        {tl("create.field.digitalUrl")}
+                      <Label htmlFor="digitalFileInput" className="text-label">
+                        {tl("create.field.digitalFile")}
                       </Label>
                       <Input
-                        id="digitalFileUrl"
-                        value={form.digitalFileUrl}
-                        onChange={(e) => set("digitalFileUrl", e.target.value)}
-                        placeholder="https://..."
+                        id="digitalFileInput"
+                        type="file"
+                        accept=".pdf,.zip,.png,.jpg,.jpeg,.epub,.mp4,application/pdf,application/zip,image/png,image/jpeg,application/epub+zip,video/mp4"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] ?? null;
+                          if (!file) {
+                            setDigitalUploadFile(null);
+                            return;
+                          }
+                          const err = validateDigitalFile(file);
+                          if (err) {
+                            setDigitalUploadFile(null);
+                            setErrors((prev) => ({
+                              ...prev,
+                              digitalFileUrl: err,
+                            }));
+                            return;
+                          }
+                          setDigitalUploadFile(file);
+                          setErrors((prev) => ({
+                            ...prev,
+                            digitalFileUrl: undefined,
+                          }));
+                        }}
                         className={
                           errors.digitalFileUrl ? "border-destructive" : ""
                         }
-                        data-ocid="input-digital-url"
+                        data-ocid="input-digital-file"
                       />
+                      {digitalUploadFile && (
+                        <p className="text-xs text-muted-foreground">
+                          {digitalUploadFile.name} (
+                          {Math.round(digitalUploadFile.size / 1024)} KB)
+                        </p>
+                      )}
                       {errors.digitalFileUrl && (
                         <p className="text-xs text-destructive flex items-center gap-1">
                           <AlertCircle className="w-3.5 h-3.5" />
                           {errors.digitalFileUrl}
                         </p>
                       )}
-                      {form.digitalFileUrl.trim() && (
+                      {(digitalUploadFile || form.digitalFileUrl.trim()) && (
                         <p
                           className="flex items-center gap-1.5 text-xs text-primary/80 mt-0.5"
                           data-ocid="digital-encryption-notice"
@@ -1830,6 +2047,15 @@ export default function CreateListingPage() {
                           {tl("digital.encryptionNotice")}
                         </p>
                       )}
+                    </div>
+
+                    {/* Legacy URL fallback hidden — file upload is primary (E2.S11) */}
+                    <div className="hidden">
+                      <Input
+                        id="digitalFileUrl"
+                        value={form.digitalFileUrl}
+                        readOnly
+                      />
                     </div>
 
                     {/* File Hash (optional) */}
@@ -1845,80 +2071,6 @@ export default function CreateListingPage() {
                         className="font-mono text-sm"
                         data-ocid="input-digital-hash"
                       />
-                    </div>
-
-                    {/* Password protection */}
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between rounded-lg border border-border bg-muted/20 px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <Lock className="w-4 h-4 text-muted-foreground" />
-                          <p className="text-sm font-medium text-foreground">
-                            {tl("digital.field.passwordProtection")}
-                          </p>
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={form.digitalPasswordEnabled}
-                          onChange={(e) =>
-                            set("digitalPasswordEnabled", e.target.checked)
-                          }
-                          className="w-4 h-4 accent-primary cursor-pointer"
-                          data-ocid="checkbox-digital-password"
-                        />
-                      </div>
-                      {form.digitalPasswordEnabled && (
-                        <div className="flex gap-2">
-                          <Input
-                            id="digitalPassword"
-                            value={form.digitalPassword}
-                            onChange={(e) =>
-                              set("digitalPassword", e.target.value)
-                            }
-                            placeholder={tl("digital.field.password")}
-                            className="font-mono text-sm"
-                            data-ocid="input-digital-password"
-                          />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="shrink-0 gap-1.5"
-                            onClick={() => {
-                              const chars =
-                                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
-                              const pwd = Array.from(
-                                { length: 16 },
-                                () =>
-                                  chars[
-                                    Math.floor(Math.random() * chars.length)
-                                  ],
-                              ).join("");
-                              set("digitalPassword", pwd);
-                            }}
-                            data-ocid="btn-generate-password"
-                          >
-                            <RefreshCw className="w-3.5 h-3.5" />
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="shrink-0"
-                            onClick={() => {
-                              if (form.digitalPassword) {
-                                navigator.clipboard.writeText(
-                                  form.digitalPassword,
-                                );
-                              }
-                            }}
-                            disabled={!form.digitalPassword}
-                            aria-label={tl("digital.delivery.copyPassword")}
-                            data-ocid="btn-copy-password"
-                          >
-                            <Copy className="w-3.5 h-3.5" />
-                          </Button>
-                        </div>
-                      )}
                     </div>
                   </div>
                 )}
@@ -2023,6 +2175,100 @@ export default function CreateListingPage() {
                     />
                   </div>
                 </div>
+
+                {!isEditMode && requiredStakeMicros !== null && (
+                  <div
+                    className="rounded-xl border border-border bg-muted/20 px-4 py-4 space-y-3"
+                    data-ocid="listing-stake-panel"
+                  >
+                    <div className="flex items-start gap-2">
+                      <Lock className="w-4 h-4 mt-0.5 text-primary shrink-0" />
+                      <div className="space-y-1">
+                        <p className="text-sm font-semibold text-foreground">
+                          {tl("create.stake.title")}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {tl("create.stake.rule")}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <p className="text-muted-foreground">
+                          {tl("create.stake.required")}
+                        </p>
+                        <p className="font-semibold font-mono">
+                          {formatStakeMicros(
+                            requiredStakeMicros,
+                            form.priceToken,
+                          )}{" "}
+                          {
+                            TOKENS.find((tk) => tk.value === form.priceToken)
+                              ?.label
+                          }
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">
+                          {tl("create.stake.available")}
+                        </p>
+                        <p className="font-semibold font-mono">
+                          {stakeBalance
+                            ? formatStakeMicros(
+                                stakeBalance.available,
+                                form.priceToken,
+                              )
+                            : "—"}{" "}
+                          {
+                            TOKENS.find((tk) => tk.value === form.priceToken)
+                              ?.label
+                          }
+                        </p>
+                        {stakeBalance && stakeBalance.locked > 0n && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {tl("create.stake.locked")}:{" "}
+                            {formatStakeMicros(
+                              stakeBalance.locked,
+                              form.priceToken,
+                            )}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    {stakeShortfall !== null && stakeShortfall > 0n && (
+                      <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                        <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                        {tl("create.stake.insufficient")}
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      {tl("create.stake.depositHint")}
+                    </p>
+                    {stakeShortfall !== null && stakeShortfall > 0n && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-2"
+                        disabled={isDepositingStake || isSubmitting}
+                        onClick={handleDepositRequiredStake}
+                        data-ocid="btn-deposit-stake"
+                      >
+                        {isDepositingStake ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            {tl("create.stake.depositing")}
+                          </>
+                        ) : (
+                          <>
+                            <Lock className="w-4 h-4" />
+                            {tl("create.stake.depositBtn")}
+                          </>
+                        )}
+                      </Button>
+                    )}
+                  </div>
+                )}
 
                 <div className="space-y-2">
                   <Label htmlFor="location" className="text-label">

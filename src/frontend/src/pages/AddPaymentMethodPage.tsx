@@ -13,7 +13,6 @@ import {
   CreditCard,
   Loader2,
   Shield,
-  Trash2,
   TriangleAlert,
   Wallet,
 } from "lucide-react";
@@ -29,6 +28,15 @@ import {
 } from "../hooks/useBackend";
 import type { AddressVerification, PaymentMethod } from "../hooks/useBackend";
 import { useLocale } from "../hooks/useLocale";
+import {
+  newWalletSessionId,
+  signWalletLinkMessage,
+  tokenToWalletChain,
+} from "../lib/walletLink";
+import {
+  linkExternalWallet,
+  requestWalletLinkNonce,
+} from "../lib/walletLinkApi";
 import { NETWORK_HINTS, TOKEN_LABELS } from "../utils/addressDetector";
 
 const STORAGE_KEY = "seller_payment_methods";
@@ -111,12 +119,13 @@ function VerificationBadge({
 
 export default function AddPaymentMethodPage() {
   const { t } = useLocale();
-  const { isAuthenticated, isInitializing, login } = useAuth();
+  const { isAuthenticated, isInitializing, login, identity } = useAuth();
   const { actor } = useBackend();
   const queryClient = useQueryClient();
 
   const [address, setAddress] = useState("");
   const [selectedToken, setSelectedToken] = useState("USDT_TRC20");
+  const [isLinkingWallet, setIsLinkingWallet] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [verifyState, setVerifyState] = useState<VerifyState>({
     status: "idle",
@@ -146,16 +155,20 @@ export default function AddPaymentMethodPage() {
     loadLegacyMethods(),
   );
 
-  // Derive displayed methods: backend when available, localStorage as fallback
-  const displayMethods: PaymentMethod[] =
-    isAuthenticated && backendMethods
-      ? backendMethods
-      : legacyMethods.map((m) => ({
-          token: m.token as PaymentMethod["token"],
-          address: m.address,
-          addedAt: BigInt(0),
-          verification: undefined,
-        }));
+  // Derive displayed methods: backend for authenticated users only
+  const isMethodsPending =
+    isAuthenticated &&
+    (!actor || methodsLoading || backendMethods === undefined);
+
+  const displayMethods: PaymentMethod[] = isAuthenticated
+    ? (backendMethods ?? [])
+    : legacyMethods.map((m) => ({
+        token: m.token as PaymentMethod["token"],
+        address: m.address,
+        addedAt: BigInt(0),
+        verification: undefined,
+        walletLinkId: 0n,
+      }));
 
   // Real-time address validation check
   const hint = NETWORK_HINTS[selectedToken];
@@ -215,6 +228,54 @@ export default function AddPaymentMethodPage() {
     }
   };
 
+  const handleWalletLinkProof = async () => {
+    const trimmed = address.trim();
+    if (!trimmed || !identity || identity.getPrincipal().isAnonymous()) return;
+    const chain = tokenToWalletChain(selectedToken);
+    if (!chain) {
+      toast.error(t("walletLink.unsupportedToken"));
+      return;
+    }
+    setIsLinkingWallet(true);
+    try {
+      const sessionId = newWalletSessionId();
+      const challenge = await requestWalletLinkNonce(
+        identity,
+        chain,
+        trimmed,
+        "payout",
+        sessionId,
+      );
+      if (!challenge) {
+        toast.error(t("walletLink.challengeFailed"));
+        return;
+      }
+      const signature = await signWalletLinkMessage(
+        chain,
+        trimmed,
+        challenge.message,
+      );
+      const linked = await linkExternalWallet(
+        identity,
+        challenge.challengeId,
+        signature,
+        challenge.message,
+      );
+      if (!linked) {
+        toast.error(t("walletLink.linkFailed"));
+        return;
+      }
+      toast.success(t("walletLink.linked"));
+      await queryClient.invalidateQueries({ queryKey: ["linkedWallets"] });
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : t("walletLink.linkFailed"),
+      );
+    } finally {
+      setIsLinkingWallet(false);
+    }
+  };
+
   const handleSave = async () => {
     const trimmed = address.trim();
     if (!trimmed || !actor) return;
@@ -247,25 +308,6 @@ export default function AddPaymentMethodPage() {
     } finally {
       setIsSaving(false);
     }
-  };
-
-  const handleRemove = async (method: PaymentMethod) => {
-    // NOTE: The backend does not yet expose a deletePaymentMethod endpoint.
-    // Removal is handled optimistically — the method is removed from the local
-    // React Query cache immediately, giving the user instant visual feedback.
-    // However, the change is NOT persisted to the backend; if the page is
-    // refreshed, the method will reappear from the backend's stored list.
-    // To implement permanent deletion, a `deletePaymentMethod(token, address)`
-    // endpoint must be added to the backend and wired here.
-    queryClient.setQueryData<PaymentMethod[]>(["paymentMethods"], (old) =>
-      (old ?? []).filter(
-        (m) =>
-          !(
-            (m.token as string) === (method.token as string) &&
-            m.address === method.address
-          ),
-      ),
-    );
   };
 
   return (
@@ -354,6 +396,37 @@ export default function AddPaymentMethodPage() {
               </div>
             )}
 
+            {isAddressValid &&
+              address.trim() &&
+              tokenToWalletChain(selectedToken) && (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    {t("walletLink.antiphishing")}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleWalletLinkProof}
+                    disabled={isLinkingWallet}
+                    className="gap-1.5"
+                    data-ocid="payment.wallet_link_proof_button"
+                  >
+                    {isLinkingWallet ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        {t("walletLink.signing")}
+                      </>
+                    ) : (
+                      <>
+                        <Wallet className="h-3.5 w-3.5" />
+                        {t("walletLink.connectWithProof")}
+                      </>
+                    )}
+                  </Button>
+                </div>
+              )}
+
             <Button
               type="button"
               onClick={handleSave}
@@ -381,7 +454,7 @@ export default function AddPaymentMethodPage() {
             {t("payment.savedMethods")}
           </h2>
 
-          {methodsLoading ? (
+          {isMethodsPending ? (
             <div
               className="space-y-2"
               data-ocid="payment.methods_loading_state"
@@ -418,17 +491,6 @@ export default function AddPaymentMethodPage() {
                     </code>
                     <VerificationBadge verification={method.verification} />
                   </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
-                    onClick={() => handleRemove(method)}
-                    aria-label={t("payment.remove")}
-                    data-ocid={`payment.remove_button.${index + 1}`}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
                 </div>
               ))}
             </div>

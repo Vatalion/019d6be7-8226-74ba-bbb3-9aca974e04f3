@@ -63,7 +63,7 @@ module {
   // ─── Constants ────────────────────────────────────────────────────────────
 
   /// 7 days in nanoseconds (7 * 24 * 3600 * 1_000_000_000).
-  public let VOTING_WINDOW_NS : Int = 604_800_000_000_000;
+  public let VOTING_WINDOW_NS : Nat = 604_800_000_000_000;
 
   /// Minimum reputation score required to submit a proposal.
   public let MIN_REPUTATION_TO_PROPOSE : Int = 100;
@@ -123,7 +123,7 @@ module {
     );
     if (not allowed) return #err(#rate_limited);
 
-    let now = Time.now();
+    let now = Types.now();
     let proposal : Proposal = {
       id             = nextId;
       proposer       = caller;
@@ -166,7 +166,7 @@ module {
       return #err(#invalid_input("Proposal is not active"));
     };
 
-    let now = Time.now();
+    let now = Types.now();
     if (now > proposal.deadline) {
       return #err(#invalid_input("Voting window has closed"));
     };
@@ -211,7 +211,7 @@ module {
       return #err(#invalid_input("Proposal is not active"));
     };
 
-    let now = Time.now();
+    let now = Types.now();
     if (now <= proposal.deadline) {
       return #err(#invalid_input("Voting window has not yet closed"));
     };
@@ -299,7 +299,7 @@ module {
     };
 
     proposal.status     := #executed;
-    proposal.executedAt := ?Time.now();
+    proposal.executedAt := ?Types.now();
     #ok(newWithdrawalId)
   };
 

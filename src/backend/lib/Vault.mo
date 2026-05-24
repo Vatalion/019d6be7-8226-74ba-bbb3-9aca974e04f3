@@ -248,7 +248,7 @@ module {
           network        = meta.network;
           address        = address;
           derivationPath = path;
-          derivedAt      = Time.now();
+          derivedAt      = Types.now();
         };
         addressCache.add(key, entry);
         entry;

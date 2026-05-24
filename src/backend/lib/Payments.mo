@@ -6,10 +6,14 @@ import Time "mo:core/Time";
 import Principal "mo:core/Principal";
 import Types "../types";
 import Admin "Admin";
+import Escrow "Escrow";
 
 /// Payments — pure stateless domain logic for token metadata, amount formatting,
 /// validation, transaction history queries, and Phase-2 payment verification helpers.
 module {
+
+  public let ADDRESS_VERIFY_TTL_NS : Nat = 86_400_000_000_000;
+  public let MAX_ADDRESS_VERIFY_CACHE_ENTRIES : Nat = 2_000;
 
   // ─── Token metadata ────────────────────────────────────────────────────────
 
@@ -269,6 +273,11 @@ module {
       case (#funded,           #funded)           true;
       case (#buyer_confirmed,  #buyer_confirmed)  true;
       case (#payment_verified, #payment_verified) true;
+      case (#manual_payment_pending, #manual_payment_pending) true;
+      case (#payment_intent_expired, #payment_intent_expired) true;
+      case (#awaiting_seller_handshake, #awaiting_seller_handshake) true;
+      case (#payment_intent, #payment_intent) true;
+      case (#cancelled_no_seller_response, #cancelled_no_seller_response) true;
       case (#complete,         #complete)         true;
       case (#refunded,         #refunded)         true;
       case (#disputed,         #disputed)         true;
@@ -321,25 +330,7 @@ module {
     });
 
     let all        = matched.map(func(t : Types.Trade) : Types.TradeView {
-      {
-        id                  = t.id;
-        listing             = t.listing;
-        buyer               = t.buyer;
-        seller              = t.seller;
-        amount              = t.amount;
-        token               = t.token;
-        status              = t.status;
-        createdAt           = t.createdAt;
-        fundedAt            = t.fundedAt;
-        confirmedAt         = t.confirmedAt;
-        completedAt         = t.completedAt;
-        refundDeadline      = t.refundDeadline;
-        escrowAccount       = t.escrowAccount;
-        shippingSelection   = t.shippingSelection;
-        ttnNumber           = t.ttnNumber;
-        ttnCreationStatus   = t.ttnCreationStatus;
-        digitalDelivery     = t.digitalDelivery;
-      }
+      Escrow.toView(t, false)
     }).toArray();
     let totalCount = all.size();
 
@@ -593,7 +584,7 @@ module {
   // ─── Rate limiting helpers ─────────────────────────────────────────────────
 
   /// 5-minute window in nanoseconds, max 10 calls per trade per window.
-  let RATE_LIMIT_WINDOW_NS : Int = 300_000_000_000;
+  let RATE_LIMIT_WINDOW_NS : Nat = 300_000_000_000;
   let RATE_LIMIT_MAX_CALLS : Nat = 10;
 
   /// Returns true if the caller is within the rate limit for a given tradeId.
@@ -602,7 +593,7 @@ module {
     rateLimitVerify : Map.Map<Types.TradeId, (Nat, Types.Timestamp)>,
     tradeId         : Types.TradeId,
   ) : Bool {
-    let now = Time.now();
+    let now = Types.now();
     switch (rateLimitVerify.get(tradeId)) {
       case null {
         rateLimitVerify.add(tradeId, (1, now));
@@ -643,7 +634,7 @@ module {
       txHash;
       network;
       reason;
-      timestamp = Time.now();
+      timestamp = Types.now();
     });
   };
 
@@ -654,9 +645,15 @@ module {
     "https://api.trongrid.io/v1/transactions/" # txHash
   };
 
-  /// BSCScan — transaction receipt status
+  /// BSCScan — transaction receipt status (legacy; prefer bscScanReceiptUrl for LG-09).
   public func bscScanUrl(txHash : Text, apiKey : Text) : Text {
     "https://api.bscscan.com/api?module=transaction&action=gettxreceiptstatus&txhash="
+      # txHash # "&apikey=" # apiKey
+  };
+
+  /// BSCScan — full eth_getTransactionReceipt (Transfer log parsing for BEP20 LG-09).
+  public func bscScanReceiptUrl(txHash : Text, apiKey : Text) : Text {
+    "https://api.bscscan.com/api?module=proxy&action=eth_getTransactionReceipt&txhash="
       # txHash # "&apikey=" # apiKey
   };
 
@@ -688,6 +685,48 @@ module {
   public func infuraRpcBody(txHash : Text) : Text {
     "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getTransactionReceipt\"," #
     "\"params\":[\"" # txHash # "\"]}"
+  };
+
+  public func infuraBlockNumberBody() : Text {
+    "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_blockNumber\",\"params\":[]}"
+  };
+
+  /// Minimum EVM confirmations for ERC20 manual settlement (E4.S8 / E4.S2).
+  public let MIN_EVM_CONFIRMATIONS : Nat = 12;
+
+  /// Mainnet ERC-20 stablecoin contracts (Ethereum).
+  let USDT_ERC20_CONTRACT = "0xdac17f958d2ee523a2206206994597c13d831ec7";
+  let USDC_ERC20_CONTRACT = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+  public let USDT_BEP20_CONTRACT = "0x55d398326f99059ff775485246999027b3197955";
+  public let USDT_TRC20_CONTRACT = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
+
+  public func expectedBep20Contract(token : Types.TradeToken) : ?Text {
+    switch (token) { case (#USDT_BEP20) ?USDT_BEP20_CONTRACT; case (_) null };
+  };
+
+  public func expectedTrc20Contract(token : Types.TradeToken) : ?Text {
+    switch (token) { case (#USDT_TRC20) ?USDT_TRC20_CONTRACT; case (_) null };
+  };
+
+  public func expectedErc20Contract(token : Types.TradeToken) : ?Text {
+    switch (token) {
+      case (#USDT_ERC20) ?USDT_ERC20_CONTRACT;
+      case (#USDC_ERC20) ?USDC_ERC20_CONTRACT;
+      case (_) null;
+    }
+  };
+
+  public func evmConfirmationsSufficient(txBlock : Nat, currentBlock : Nat) : Bool {
+    if (currentBlock < txBlock) return false;
+    (currentBlock - txBlock + 1) >= MIN_EVM_CONFIRMATIONS
+  };
+
+  /// Parse eth_blockNumber JSON-RPC response.
+  public func parseEthBlockNumberResponse(json : Text) : ?Nat {
+    switch (extractJsonField(json, "result")) {
+      case (?hex) ?hexTextToNat(hex);
+      case null null;
+    }
   };
 
   // ─── Response parsers ──────────────────────────────────────────────────────
@@ -739,8 +778,8 @@ module {
   /// Parse TronGrid transaction response.
   /// Returns (recipient, amountStr, blockNumber) on success.
   public func parseTronGridResponse(json : Text) : ?{ recipient : Text; amount : Text; blockNumber : Nat } {
-    // TronGrid wraps data in {"data":[{...}]} — check for "success" or "data"
     if (not json.contains(#text "\"data\"")) return null;
+    if (not json.contains(#text USDT_TRC20_CONTRACT)) return null;
     // Extract "to_address" and "amount" from contract data
     let recipient = switch (extractJsonField(json, "to_address")) {
       case (?r) r;
@@ -770,6 +809,176 @@ module {
       case null 0;
     };
     ?{ success = true; blockNumber }
+  };
+
+  func hexCharToNat(ch : Char) : Nat {
+    if (ch >= '0' and ch <= '9') {
+      switch ch {
+        case '0' 0; case '1' 1; case '2' 2; case '3' 3; case '4' 4;
+        case '5' 5; case '6' 6; case '7' 7; case '8' 8; case '9' 9; case _ 0
+      }
+    } else if (ch >= 'a' and ch <= 'f') {
+      switch ch {
+        case 'a' 10; case 'b' 11; case 'c' 12;
+        case 'd' 13; case 'e' 14; case 'f' 15; case _ 0
+      }
+    } else if (ch >= 'A' and ch <= 'F') {
+      switch ch {
+        case 'A' 10; case 'B' 11; case 'C' 12;
+        case 'D' 13; case 'E' 14; case 'F' 15; case _ 0
+      }
+    } else 0
+  };
+
+  func hexTextToNat(hex : Text) : Nat {
+    var result : Nat = 0;
+    var skip = 0;
+    for (ch in hex.toIter()) {
+      if (skip < 2 and ch == 'x') { skip += 1; continue };
+      if (skip < 2 and ch == '0') { skip += 1; continue };
+      result := result * 16 + hexCharToNat(ch);
+    };
+    result
+  };
+
+  func lowercaseChar(ch : Char) : Char {
+    if (ch >= 'A' and ch <= 'Z') {
+      switch ch {
+        case 'A' 'a'; case 'B' 'b'; case 'C' 'c'; case 'D' 'd'; case 'E' 'e';
+        case 'F' 'f'; case 'G' 'g'; case 'H' 'h'; case 'I' 'i'; case 'J' 'j';
+        case 'K' 'k'; case 'L' 'l'; case 'M' 'm'; case 'N' 'n'; case 'O' 'o';
+        case 'P' 'p'; case 'Q' 'q'; case 'R' 'r'; case 'S' 's'; case 'T' 't';
+        case 'U' 'u'; case 'V' 'v'; case 'W' 'w'; case 'X' 'x'; case 'Y' 'y';
+        case 'Z' 'z'; case _ ch
+      }
+    } else ch
+  };
+
+  /// Lowercase EVM addresses for case-insensitive explorer match (LG-09).
+  public func normalizeAddressForMatch(addr : Text) : Text {
+    if (addr.size() >= 2) {
+      var prefix = "";
+      var rest = "";
+      var i = 0;
+      for (ch in addr.toIter()) {
+        if (i < 2) { prefix #= Text.fromChar(ch) }
+        else { rest #= Text.fromChar(lowercaseChar(ch)) };
+        i += 1;
+      };
+      if (prefix == "0x") { "0x" # rest } else addr
+    } else addr
+  };
+
+  public func amountTextToNat(amountStr : Text) : Nat {
+    switch (Nat.fromText(amountStr)) {
+      case null 0;
+      case (?n) n;
+    }
+  };
+
+  /// Parse BEP20 USDT Transfer from eth_getTransactionReceipt JSON (LG-09).
+  /// Fail-closed: returns null when receipt failed or no Transfer log found.
+  public func parseBscScanTokenTransfer(json : Text) : ?{
+    recipient : Text;
+    amountRaw : Nat;
+    blockNumber : Nat;
+  } {
+    if (not json.contains(#text "\"status\":\"0x1\"")) return null;
+    if (not json.contains(#text "ddf252ad1be2c89b69c2b068fc378daa952ba7f163caa17373")) {
+      return null;
+    };
+    let blockHex = switch (extractJsonField(json, "blockNumber")) {
+      case (?b) b;
+      case null return null;
+    };
+    let blockNumber = hexTextToNat(blockHex);
+    var recipient = "";
+    var addrIdx : Nat = 0;
+    var seenTransfer = false;
+    for (segment in json.split(#text "ddf252ad1be2c89b69c2b068fc378daa952ba7f163caa17373")) {
+      if (not seenTransfer) {
+        seenTransfer := true;
+      } else {
+        for (part in segment.split(#text "\"0x")) {
+          if (part.size() >= 64) {
+            var hex = "";
+            var pos = 0;
+            for (ch in part.toIter()) {
+              if (pos < 64) { hex #= Text.fromChar(ch) };
+              pos += 1;
+            };
+            if (hex.size() == 64) {
+              if (addrIdx == 1) {
+                let padded = "0x" # hex;
+                recipient := normalizeAddressForMatch(
+                  if (padded.size() > 42) {
+                    "0x" # sliceText(hex, hex.size() - 40, 40)
+                  } else padded
+                );
+              };
+              addrIdx += 1;
+            };
+          };
+        };
+      };
+    };
+    if (recipient == "") return null;
+    let dataHex = switch (extractJsonField(json, "data")) {
+      case (?d) d;
+      case null return null;
+    };
+    let amountRaw = hexTextToNat(dataHex);
+    if (amountRaw == 0) return null;
+    ?{ recipient; amountRaw; blockNumber }
+  };
+
+  /// Parse ERC-20 Transfer from eth_getTransactionReceipt JSON (E4.S8 / LG-09).
+  /// Fail-closed when receipt failed, contract mismatch, or no matching Transfer log.
+  public func parseEvmTokenTransfer(
+    json : Text,
+    expectedContract : Text,
+  ) : ?{
+    recipient : Text;
+    amountRaw : Nat;
+    blockNumber : Nat;
+    contract : Text;
+  } {
+    if (not json.contains(#text "\"status\":\"0x1\"")) return null;
+    if (not json.contains(#text "ddf252ad1be2c89b69c2b068fc378daa952ba7f163caa17373")) {
+      return null;
+    };
+    let expected = normalizeAddressForMatch(expectedContract);
+    switch (extractJsonField(json, "address")) {
+      case null return null;
+      case (?addr) {
+        if (normalizeAddressForMatch(addr) != expected) return null;
+      };
+    };
+    switch (parseBscScanTokenTransfer(json)) {
+      case null null;
+      case (?parsed) {
+        ?{
+          recipient = parsed.recipient;
+          amountRaw = parsed.amountRaw;
+          blockNumber = parsed.blockNumber;
+          contract = expected;
+        }
+      };
+    }
+  };
+
+  func sliceText(text : Text, start : Nat, len : Nat) : Text {
+    var result = "";
+    var pos : Nat = 0;
+    var taken : Nat = 0;
+    for (ch in text.toIter()) {
+      if (pos >= start and taken < len) {
+        result #= Text.fromChar(ch);
+        taken += 1;
+      };
+      pos += 1;
+    };
+    result
   };
 
   /// Parse Solana RPC getTransaction response.
@@ -880,6 +1089,80 @@ module {
       case (#ckUSDC)       "Internet Computer";
       case (#ckUSDT)       "Internet Computer";
     };
+  };
+
+  /// Validates explorer-observed transfer against PaymentIntent (LG-09 / E13.S1).
+  /// Returns error reason when mismatch; null when acceptable.
+  public func validateExplorerMatch(
+    intent : Types.PaymentIntent,
+    recipient : Text,
+    amountMicros : Nat,
+  ) : ?Text {
+    let observedRecipient = normalizeAddressForMatch(recipient);
+    let expectedRecipient = normalizeAddressForMatch(intent.recipient);
+    if (observedRecipient != expectedRecipient) {
+      return ?("Explorer recipient does not match PaymentIntent");
+    };
+    if (amountMicros == 0) {
+      return ?("Explorer amount missing — verification rejected");
+    };
+    if (amountMicros < intent.exactAmount) {
+      return ?("Explorer amount underpays PaymentIntent");
+    };
+    null
+  };
+
+  /// Rejects reused tx hashes across trades (LG-09 / E13.S1).
+  public func validateTxHashNotReused(
+    usedHashes : Map.Map<Text, Types.TradeId>,
+    txHash : Text,
+    tradeId : Types.TradeId,
+  ) : ?Text {
+    switch (usedHashes.get(txHash)) {
+      case null null;
+      case (?existing) {
+        if (existing == tradeId) null
+        else ?("Transaction hash already used for another trade")
+      };
+    }
+  };
+
+  /// LG-09 gate: explorer amount/recipient + tx hash reuse before payment_verified.
+  public func applyExplorerVerificationGates(
+    intent : Types.PaymentIntent,
+    txHash : Text,
+    tradeId : Types.TradeId,
+    usedHashes : Map.Map<Text, Types.TradeId>,
+    recipient : Text,
+    amountRaw : Nat,
+    baseResult : Types.PaymentVerificationResult,
+  ) : Types.PaymentVerificationResult {
+    switch (baseResult.status) {
+      case (#verified) {
+        switch (validateTxHashNotReused(usedHashes, txHash, tradeId)) {
+          case (?reason) {
+            {
+              baseResult with
+              status = #failed;
+              errorReason = ?reason;
+            }
+          };
+          case null {
+            switch (validateExplorerMatch(intent, recipient, amountRaw)) {
+              case (?reason) {
+                {
+                  baseResult with
+                  status = #failed;
+                  errorReason = ?reason;
+                }
+              };
+              case null baseResult;
+            };
+          };
+        };
+      };
+      case (_) baseResult;
+    }
   };
 
   /// Returns the EVM network key used in infuraUrl() for a token.

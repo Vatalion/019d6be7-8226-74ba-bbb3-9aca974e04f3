@@ -31,6 +31,7 @@ args = [
 
 [dependencies]
 core = "2.2.0"
+caffeineai-object-storage = "0.1.2"
 
 [dev-dependencies]
 test = "2.1.2"

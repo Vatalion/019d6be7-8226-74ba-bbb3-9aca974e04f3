@@ -43,7 +43,7 @@ mixin (
       reviewed  = reviewed;
       rating    = rating;
       comment   = comment;
-      createdAt = Time.now();
+      createdAt = Types.now();
     };
 
     feedbacks.add(id, fb);

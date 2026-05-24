@@ -26,7 +26,7 @@ mixin (
 ) {
 
   func enrichCards(ids : [Types.ListingId]) : [Types.ListingCard] {
-    let now = Time.now();
+    let now = Types.now();
     var out = List.empty<Types.ListingCard>();
     for (id in ids.vals()) {
       switch (listings.get(id)) {
@@ -103,6 +103,15 @@ mixin (
     Engagement.getSavedSearches(savedSearches, caller)
   };
 
+  public shared ({ caller }) func setSavedSearchAlerts(
+    id      : Types.SavedSearchId,
+    enabled : Bool,
+  ) : async Types.Result<()> {
+    Auth.assertNotAnonymous(caller);
+    ignore Auth.requireUser(users, caller);
+    Engagement.setSavedSearchAlerts(savedSearches, caller, id, enabled)
+  };
+
   // ─── Listing inquiries ────────────────────────────────────────────────────
 
   public shared ({ caller }) func sendListingInquiry(
@@ -158,7 +167,7 @@ mixin (
   public shared ({ caller }) func bumpListing(id : Types.ListingId) : async Types.Result<()> {
     Auth.assertNotAnonymous(caller);
     ignore Auth.requireUser(users, caller);
-    Engagement.bumpListing(listings, caller, id, Time.now())
+    Engagement.bumpListing(listings, caller, id, Types.now())
   };
 
 };

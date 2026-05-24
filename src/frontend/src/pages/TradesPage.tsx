@@ -6,9 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useBackend } from "@/hooks/useBackend";
+import { formatTokenAmountLabel } from "@/lib/tradeFeeQuote";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { formatDistanceToNow } from "date-fns";
+import { AlertTriangle, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { useLocale } from "../hooks/useLocale";
 import { detectLocale, t } from "../i18n";
@@ -19,8 +21,7 @@ function truncatePrincipal(p: string): string {
 }
 
 function formatAmount(amount: bigint, token: TradeToken): string {
-  const n = Number(amount) / 1e8;
-  return `${n.toFixed(n < 0.01 ? 6 : 4)} ${token}`;
+  return formatTokenAmountLabel(amount, token);
 }
 
 function statusBadge(status: TradeStatus) {
@@ -29,6 +30,26 @@ function statusBadge(status: TradeStatus) {
     TradeStatus,
     { labelKey: Parameters<typeof t>[1]; cls: string }
   > = {
+    awaiting_seller_handshake: {
+      labelKey: "trade.status.awaiting_seller_handshake",
+      cls: "status-badge-pending",
+    },
+    payment_intent: {
+      labelKey: "trade.status.payment_intent",
+      cls: "status-badge-funded",
+    },
+    manual_payment_pending: {
+      labelKey: "trade.status.manual_payment_pending",
+      cls: "status-badge-pending",
+    },
+    payment_intent_expired: {
+      labelKey: "trade.status.payment_intent_expired",
+      cls: "inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-destructive/15 text-destructive",
+    },
+    cancelled_no_seller_response: {
+      labelKey: "trade.status.cancelled_no_seller_response",
+      cls: "status-badge-pending",
+    },
     pending: { labelKey: "trade.status.pending", cls: "status-badge-pending" },
     funded: { labelKey: "trade.status.funded", cls: "status-badge-funded" },
     awaiting_approval: {
@@ -43,6 +64,22 @@ function statusBadge(status: TradeStatus) {
       labelKey: "trade.status.payment_verified",
       cls: "inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-green-500/25 text-green-700 dark:text-green-200",
     },
+    digital_delivered: {
+      labelKey: "trade.status.digital_delivered",
+      cls: "inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-blue-500/25 text-blue-700 dark:text-blue-200",
+    },
+    fulfillment_pending: {
+      labelKey: "trade.status.fulfillment_pending",
+      cls: "status-badge-pending",
+    },
+    shipped: {
+      labelKey: "trade.status.shipped",
+      cls: "status-badge-funded",
+    },
+    awaiting_receipt: {
+      labelKey: "trade.status.awaiting_receipt",
+      cls: "status-badge-confirmed",
+    },
     complete: {
       labelKey: "trade.status.complete",
       cls: "status-badge-confirmed",
@@ -55,8 +92,20 @@ function statusBadge(status: TradeStatus) {
       labelKey: "trade.status.disputed",
       cls: "status-badge-dispute",
     },
+    dispute_l1: {
+      labelKey: "trade.status.disputed",
+      cls: "status-badge-dispute",
+    },
+    dispute_l2: {
+      labelKey: "trade.status.disputed",
+      cls: "status-badge-dispute",
+    },
     cancelled: {
       labelKey: "trade.status.cancelled",
+      cls: "status-badge-pending",
+    },
+    cancelled_buyer_pre_ship: {
+      labelKey: "trade.status.cancelled_buyer_pre_ship",
       cls: "status-badge-pending",
     },
   };
@@ -70,7 +119,12 @@ function statusBadge(status: TradeStatus) {
 function TradeRow({
   trade,
   myPrincipal,
-}: { trade: TradeView; myPrincipal: string }) {
+  unreadCount = 0,
+}: {
+  trade: TradeView;
+  myPrincipal: string;
+  unreadCount?: number;
+}) {
   const navigate = useNavigate();
   const counterparty =
     trade.buyer.toString() === myPrincipal ? trade.seller : trade.buyer;
@@ -79,7 +133,12 @@ function TradeRow({
   return (
     <button
       data-ocid="trade-list-row"
-      onClick={() => navigate({ to: `/trades/${trade.id}` })}
+      onClick={() =>
+        navigate({
+          to: "/trades/$id",
+          params: { id: String(trade.id) },
+        })
+      }
       type="button"
       className="w-full flex items-center gap-4 px-5 py-4 border-b border-border last:border-0 hover:bg-muted/40 transition-colors text-left"
     >
@@ -93,6 +152,15 @@ function TradeRow({
           <span className="font-semibold text-foreground truncate text-sm">
             Trade #{trade.id.toString()}
           </span>
+          {unreadCount > 0 && (
+            <Badge
+              variant="destructive"
+              className="text-[10px] px-1.5 py-0 shrink-0"
+              data-ocid={`trade-unread-${trade.id}`}
+            >
+              {unreadCount}
+            </Badge>
+          )}
           {statusBadge(trade.status)}
         </div>
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -152,11 +220,28 @@ export default function TradesPage() {
     enabled: !!actor && !isFetching,
   });
 
-  const { data: trades = [], isLoading } = useQuery({
+  const {
+    data: trades = [],
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery({
     queryKey: ["myTrades"],
     queryFn: () => actor!.getMyTrades(Variant_all_seller_buyer.all),
     enabled: !!actor && !isFetching,
+    staleTime: 60_000,
   });
+
+  const { data: unreadCounts = [] } = useQuery({
+    queryKey: ["unreadCount", "notifications"],
+    queryFn: () => actor!.getUnreadCount(),
+    enabled: !!actor && !isFetching,
+    staleTime: 30_000,
+  });
+
+  const unreadByTrade = new Map(
+    unreadCounts.map(([id, count]) => [id.toString(), Number(count)]),
+  );
 
   const myPrincipal = myProfile?.id?.toString() ?? "";
 
@@ -164,7 +249,7 @@ export default function TradesPage() {
   const selling = trades.filter((t) => t.seller.toString() === myPrincipal);
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background" data-ocid="trades-page">
       {/* Header */}
       <div className="bg-card border-b border-border px-6 py-5">
         <h1 className="text-xl font-semibold text-foreground">
@@ -208,6 +293,25 @@ export default function TradesPage() {
           </TabsList>
 
           <div className="card-elevated overflow-hidden">
+            {isError && (
+              <div
+                data-ocid="trades-load-error"
+                className="flex flex-col items-center justify-center py-16 text-center px-4 gap-3"
+              >
+                <AlertTriangle className="h-10 w-10 text-destructive opacity-80" />
+                <p className="text-sm text-foreground font-medium">
+                  {tl("trades.loadError")}
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void refetch()}
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  {tl("detail.retry")}
+                </Button>
+              </div>
+            )}
             <TabsContent value="buying" className="mt-0">
               {isLoading ? (
                 <TradeListSkeleton />
@@ -230,12 +334,13 @@ export default function TradesPage() {
                     {tl("trades.empty.browseCta")}
                   </Button>
                 </div>
-              ) : (
+              ) : isError ? null : (
                 buying.map((t) => (
                   <TradeRow
                     key={t.id.toString()}
                     trade={t}
                     myPrincipal={myPrincipal}
+                    unreadCount={unreadByTrade.get(t.id.toString()) ?? 0}
                   />
                 ))
               )}
@@ -263,12 +368,13 @@ export default function TradesPage() {
                     {tl("trades.empty.postCta")}
                   </Button>
                 </div>
-              ) : (
+              ) : isError ? null : (
                 selling.map((t) => (
                   <TradeRow
                     key={t.id.toString()}
                     trade={t}
                     myPrincipal={myPrincipal}
+                    unreadCount={unreadByTrade.get(t.id.toString()) ?? 0}
                   />
                 ))
               )}

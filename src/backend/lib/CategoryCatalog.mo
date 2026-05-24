@@ -205,4 +205,28 @@ module {
     }
   };
 
+  let TRANSPORT_ROOT : CategoryId = 3;
+  let REAL_ESTATE_ROOT : CategoryId = 2;
+
+  public func isInVertical(categoryId : CategoryId, rootId : CategoryId) : Bool {
+    containsId(descendants(rootId), categoryId)
+  };
+
+  public func attributeSchema(categoryId : CategoryId) : [Types.CategoryAttributeField] {
+    if (isInVertical(categoryId, TRANSPORT_ROOT)) {
+      [
+        { key = "make"; labelEn = "Make"; labelUk = "Марка"; fieldType = #text; required = true },
+        { key = "model"; labelEn = "Model"; labelUk = "Модель"; fieldType = #text; required = true },
+        { key = "year"; labelEn = "Year"; labelUk = "Рік"; fieldType = #number; required = true },
+      ]
+    } else if (isInVertical(categoryId, REAL_ESTATE_ROOT)) {
+      [
+        { key = "rooms"; labelEn = "Rooms"; labelUk = "Кімнати"; fieldType = #number; required = true },
+        { key = "area_sqm"; labelEn = "Area (m²)"; labelUk = "Площа (м²)"; fieldType = #number; required = true },
+      ]
+    } else {
+      []
+    }
+  };
+
 };

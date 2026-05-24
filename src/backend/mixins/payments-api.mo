@@ -7,7 +7,10 @@ import Principal "mo:core/Principal";
 import Time "mo:core/Time";
 import Types "../types";
 import Admin "../lib/Admin";
+import Auth "../lib/Auth";
 import PaymentsLib "../lib/Payments";
+import EscrowLib "../lib/Escrow";
+import DigitalDeliveryLib "../lib/DigitalDelivery";
 import Obs "../lib/Observability";
 
 /// Payments API mixin — public query endpoints for token metadata,
@@ -27,6 +30,7 @@ import Obs "../lib/Observability";
 ///   addressVerifyCache  — on-chain address verification cache (address#network → AddressVerification)
 mixin (
   trades              : Map.Map<Types.TradeId, Types.Trade>,
+  listings            : Map.Map<Types.ListingId, Types.Listing>,
   users               : Map.Map<Types.UserId, Types.User>,
   systemSettings      : Admin.SystemSettings,
   rateLimitVerify     : Map.Map<Types.TradeId, (Nat, Types.Timestamp)>,
@@ -36,6 +40,8 @@ mixin (
   nextObsErrorId      : { var value : Nat },
   rateCache           : Map.Map<Types.TradeToken, PaymentsLib.RateCacheEntry>,
   addressVerifyCache  : Map.Map<Text, Types.AddressVerification>,
+  usedPaymentTxHashes : Map.Map<Text, Types.TradeId>,
+  selfPrincipal : { var value : Principal },
 ) {
 
   // ─── HTTPS outcall infrastructure ─────────────────────────────────────────
@@ -205,6 +211,7 @@ mixin (
     if (caller.isAnonymous()) {
       return #err(#unauthorized);
     };
+    Auth.assertCallerNotBanned(users, caller);
 
     // Load trade
     let trade = switch (trades.get(tradeId)) {
@@ -217,14 +224,37 @@ mixin (
       return #err(#unauthorized);
     };
 
-    // Trade must be in a state that accepts verification
+    // Trade must be in a state that accepts verification (E3.S10 post-handshake flow)
     switch (trade.status) {
-      case (#buyer_confirmed) {};
-      case (#payment_verified) {};
+      case (#manual_payment_pending or #buyer_confirmed) {};
+      case (#payment_verified) {
+        switch (verificationResults.get(tradeId)) {
+          case (?cached) return #ok(cached);
+          case null {};
+        };
+      };
       case (_) return #err(#escrow_error(
-        "verifyPayment requires trade status #buyer_confirmed or #payment_verified, got "
+        "verifyPayment requires trade status #manual_payment_pending or #buyer_confirmed, got "
           # debug_show(trade.status)
       ));
+    };
+
+    switch (EscrowLib.assertPaymentIntentActive(trade, Types.now())) {
+      case (#err(e)) return #err(e);
+      case (#ok(intent)) {
+        if (network != intent.token) {
+          return #err(#invalid_input("Transaction token does not match PaymentIntent"));
+        };
+        switch (PaymentsLib.validateTxHashNotReused(usedPaymentTxHashes, txHash, tradeId)) {
+          case (?reason) return #err(#invalid_input(reason));
+          case null {};
+        };
+      };
+    };
+
+    let paymentIntent = switch (trade.paymentIntent) {
+      case null return #err(#escrow_error("PaymentIntent missing"));
+      case (?i) i;
     };
 
     // Rate limit: 10 calls per 5 min per trade
@@ -235,7 +265,7 @@ mixin (
     let networkLabel = PaymentsLib.networkName(network);
 
     // Dispatch to correct blockchain API (3 retries with backoff)
-    let result : Types.PaymentVerificationResult = switch (network) {
+    let (result, amountRaw) : (Types.PaymentVerificationResult, Nat) = switch (network) {
       case (#USDT_TRC20) {
         await verifyTrc20(tradeId, txHash, networkLabel);
       };
@@ -265,37 +295,49 @@ mixin (
       };
       // ICP-native tokens — not externally verifiable via HTTPS outcall
       case (#ckUSDC) {
-        {
+        ({
           status             = #failed;
           txHash;
           confirmedAmount    = 0.0;
           confirmedRecipient = "";
           blockNumber        = 0;
           errorReason        = ?("ICP-native token verification not supported via HTTPS outcall");
-        }
+        }, 0)
       };
       case (#ckUSDT) {
-        {
+        ({
           status             = #failed;
           txHash;
           confirmedAmount    = 0.0;
           confirmedRecipient = "";
           blockNumber        = 0;
           errorReason        = ?("ICP-native token verification not supported via HTTPS outcall");
-        }
+        }, 0)
       };
     };
 
-    // Cache the result for query access
-    verificationResults.add(tradeId, result);
+    let gatedResult = PaymentsLib.applyExplorerVerificationGates(
+      paymentIntent, txHash, tradeId, usedPaymentTxHashes,
+      result.confirmedRecipient, amountRaw, result,
+    );
 
-    // On verified: advance trade state
-    switch (result.status) {
+    // Cache the result for query access
+    verificationResults.add(tradeId, gatedResult);
+
+    // On verified: advance trade state via Escrow domain logic (fail-closed)
+    switch (gatedResult.status) {
       case (#verified) {
-        trade.status := #payment_verified;
+        usedPaymentTxHashes.add(txHash, tradeId);
+        switch (EscrowLib.applyPaymentVerified(trades, listings, tradeId)) {
+          case (#err(e)) return #err(e);
+          case (#ok(_)) {};
+        };
+        ignore DigitalDeliveryLib.tryAutoDeliver(
+          trades, listings, tradeId, selfPrincipal.value,
+        );
       };
       case (#failed) {
-        let reason = switch (result.errorReason) {
+        let reason = switch (gatedResult.errorReason) {
           case (?r) r;
           case null "Unknown verification failure";
         };
@@ -312,7 +354,7 @@ mixin (
       case (#pending) {};
     };
 
-    #ok(result)
+    #ok(gatedResult)
   };
 
   // ─── TRC20 verification (TronGrid) ────────────────────────────────────────
@@ -321,7 +363,7 @@ mixin (
     _tradeId     : Types.TradeId,
     txHash       : Text,
     _networkLabel : Text,
-  ) : async Types.PaymentVerificationResult {
+  ) : async (Types.PaymentVerificationResult, Nat) {
     let apiKey = systemSettings.tronGridApiKey;
     let headers : [HttpHeader] = if (apiKey == "") {
       [{ name = "Accept"; value = "application/json" }]
@@ -334,37 +376,38 @@ mixin (
     let url = PaymentsLib.tronGridUrl(txHash);
     switch (await httpGetWithRetry(url, headers, 3)) {
       case (#err(msg)) {
-        {
+        ({
           status             = #failed;
           txHash;
           confirmedAmount    = 0.0;
           confirmedRecipient = "";
           blockNumber        = 0;
           errorReason        = ?("TronGrid outcall failed: " # msg);
-        }
+        }, 0)
       };
       case (#ok(json)) {
         switch (PaymentsLib.parseTronGridResponse(json)) {
           case null {
-            {
+            ({
               status             = #failed;
               txHash;
               confirmedAmount    = 0.0;
               confirmedRecipient = "";
               blockNumber        = 0;
               errorReason        = ?("TronGrid: transaction not found or parse failed");
-            }
+            }, 0)
           };
           case (?parsed) {
+            let amountRaw = PaymentsLib.amountTextToNat(parsed.amount);
             let amt = rawAmountToFloat(parsed.amount, 6); // TRC20 USDT has 6 decimals
-            {
+            ({
               status             = #verified;
               txHash;
               confirmedAmount    = amt;
               confirmedRecipient = parsed.recipient;
               blockNumber        = parsed.blockNumber;
               errorReason        = null;
-            }
+            }, amountRaw)
           };
         }
       };
@@ -377,53 +420,42 @@ mixin (
     _tradeId      : Types.TradeId,
     txHash        : Text,
     _networkLabel : Text,
-  ) : async Types.PaymentVerificationResult {
+  ) : async (Types.PaymentVerificationResult, Nat) {
     let apiKey = systemSettings.bscScanApiKey;
-    let url = PaymentsLib.bscScanUrl(txHash, apiKey);
+    let url = PaymentsLib.bscScanReceiptUrl(txHash, apiKey);
     switch (await httpGetWithRetry(url, [{ name = "Accept"; value = "application/json" }], 3)) {
       case (#err(msg)) {
-        {
+        ({
           status             = #failed;
           txHash;
           confirmedAmount    = 0.0;
           confirmedRecipient = "";
           blockNumber        = 0;
           errorReason        = ?("BSCScan outcall failed: " # msg);
-        }
+        }, 0)
       };
       case (#ok(json)) {
-        switch (PaymentsLib.parseBscScanResponse(json)) {
+        switch (PaymentsLib.parseEvmTokenTransfer(json, PaymentsLib.USDT_BEP20_CONTRACT)) {
           case null {
-            {
+            ({
               status             = #failed;
               txHash;
               confirmedAmount    = 0.0;
               confirmedRecipient = "";
               blockNumber        = 0;
-              errorReason        = ?("BSCScan: invalid response or API error");
-            }
+              errorReason        = ?("BSCScan: token transfer amount/recipient not found — receipt-only verify rejected");
+            }, 0)
           };
           case (?parsed) {
-            if (not parsed.success) {
-              {
-                status             = #failed;
-                txHash;
-                confirmedAmount    = 0.0;
-                confirmedRecipient = "";
-                blockNumber        = parsed.blockNumber;
-                errorReason        = ?("BSCScan: transaction failed on-chain (status != 1)");
-              }
-            } else {
-              // BSCScan receipt confirms success — amount/recipient need separate call; MVP: verified.
-              {
-                status             = #verified;
-                txHash;
-                confirmedAmount    = 0.0;
-                confirmedRecipient = "";
-                blockNumber        = parsed.blockNumber;
-                errorReason        = null;
-              }
-            }
+            let amt = rawAmountToFloat(parsed.amountRaw.toText(), 18); // BEP20 USDT 18 decimals
+            ({
+              status             = #verified;
+              txHash;
+              confirmedAmount    = amt;
+              confirmedRecipient = parsed.recipient;
+              blockNumber        = parsed.blockNumber;
+              errorReason        = null;
+            }, parsed.amountRaw)
           };
         }
       };
@@ -436,7 +468,7 @@ mixin (
     _tradeId      : Types.TradeId,
     txHash        : Text,
     _networkLabel : Text,
-  ) : async Types.PaymentVerificationResult {
+  ) : async (Types.PaymentVerificationResult, Nat) {
     // Use configured Solana RPC URL or fallback to public mainnet endpoint
     let rpcUrl = if (systemSettings.solanaRpcUrl != "") {
       systemSettings.solanaRpcUrl
@@ -446,37 +478,38 @@ mixin (
     let body = PaymentsLib.solanaRpcBody(txHash);
     switch (await httpPostWithRetry(rpcUrl, body, 3)) {
       case (#err(msg)) {
-        {
+        ({
           status             = #failed;
           txHash;
           confirmedAmount    = 0.0;
           confirmedRecipient = "";
           blockNumber        = 0;
           errorReason        = ?("Solana RPC outcall failed: " # msg);
-        }
+        }, 0)
       };
       case (#ok(json)) {
         switch (PaymentsLib.parseSolanaResponse(json)) {
           case null {
-            {
+            ({
               status             = #failed;
               txHash;
               confirmedAmount    = 0.0;
               confirmedRecipient = "";
               blockNumber        = 0;
               errorReason        = ?("Solana: transaction not found or not confirmed");
-            }
+            }, 0)
           };
           case (?parsed) {
+            let amountRaw = PaymentsLib.amountTextToNat(parsed.amount);
             let amt = rawAmountToFloat(parsed.amount, 6); // SPL USDC has 6 decimals
-            {
+            ({
               status             = #verified;
               txHash;
               confirmedAmount    = amt;
               confirmedRecipient = parsed.recipient;
               blockNumber        = parsed.blockNumber;
               errorReason        = null;
-            }
+            }, amountRaw)
           };
         }
       };
@@ -487,13 +520,18 @@ mixin (
 
   /// Unified EVM verifier — handles ERC20, Polygon, Avalanche using the same
   /// eth_getTransactionReceipt pattern through Infura or public RPC endpoints.
+  /// ERC20 manual tokens (E4.S8) require Transfer log + contract match + ≥12 confirmations.
   func verifyEvm(
     _tradeId     : Types.TradeId,
     txHash       : Text,
     token        : Types.TradeToken,
     networkLabel : Text,
-  ) : async Types.PaymentVerificationResult {
+  ) : async (Types.PaymentVerificationResult, Nat) {
     let networkKey = PaymentsLib.evmNetworkKey(token);
+    let isErc20Manual = switch (token) {
+      case (#USDT_ERC20 or #USDC_ERC20) true;
+      case (_) false;
+    };
 
     // Choose API key: Polygon/Avalanche use their own keys if configured,
     // otherwise fall back to the shared Infura key.
@@ -513,53 +551,132 @@ mixin (
     let body = PaymentsLib.infuraRpcBody(txHash);
     switch (await httpPostWithRetry(url, body, 3)) {
       case (#err(msg)) {
-        {
+        ({
           status             = #failed;
           txHash;
           confirmedAmount    = 0.0;
           confirmedRecipient = "";
           blockNumber        = 0;
           errorReason        = ?(networkLabel # " RPC outcall failed: " # msg);
-        }
+        }, 0)
       };
       case (#ok(json)) {
-        switch (PaymentsLib.parseEvmResponse(json)) {
-          case null {
-            {
-              status             = #failed;
-              txHash;
-              confirmedAmount    = 0.0;
-              confirmedRecipient = "";
-              blockNumber        = 0;
-              errorReason        = ?(networkLabel # ": transaction not found or parse failed");
-            }
-          };
-          case (?parsed) {
-            if (parsed.recipient == "" and parsed.blockNumber == 0) {
-              // Transaction failed on-chain (status != 0x1)
-              {
+        if (isErc20Manual) {
+          let expectedContract = switch (PaymentsLib.expectedErc20Contract(token)) {
+            case null {
+              return ({
                 status             = #failed;
                 txHash;
                 confirmedAmount    = 0.0;
                 confirmedRecipient = "";
                 blockNumber        = 0;
-                errorReason        = ?(networkLabel # ": transaction failed on-chain (status != 0x1)");
-              }
-            } else {
-              // EVM receipt confirms success — token amount requires log parsing; MVP: verified.
-              {
-                status             = #verified;
+                errorReason        = ?(networkLabel # ": unknown ERC20 token contract");
+              }, 0);
+            };
+            case (?c) c;
+          };
+          switch (PaymentsLib.parseEvmTokenTransfer(json, expectedContract)) {
+            case null {
+              ({
+                status             = #failed;
                 txHash;
                 confirmedAmount    = 0.0;
-                confirmedRecipient = parsed.recipient;
-                blockNumber        = parsed.blockNumber;
-                errorReason        = null;
-              }
-            }
+                confirmedRecipient = "";
+                blockNumber        = 0;
+                errorReason        = ?(
+                  networkLabel
+                    # ": ERC20 token transfer not found or wrong contract — verification rejected"
+                );
+              }, 0)
+            };
+            case (?parsed) {
+              let blockBody = PaymentsLib.infuraBlockNumberBody();
+              let currentBlock : Nat = switch (await httpPostWithRetry(url, blockBody, 2)) {
+                case (#err(_)) 0;
+                case (#ok(blockJson)) {
+                  switch (PaymentsLib.parseEthBlockNumberResponse(blockJson)) {
+                    case null 0;
+                    case (?n) n;
+                  };
+                };
+              };
+              if (not PaymentsLib.evmConfirmationsSufficient(parsed.blockNumber, currentBlock)) {
+                ({
+                  status             = #failed;
+                  txHash;
+                  confirmedAmount    = 0.0;
+                  confirmedRecipient = "";
+                  blockNumber        = parsed.blockNumber;
+                  errorReason        = ?(
+                    networkLabel
+                      # ": insufficient confirmations (need "
+                      # PaymentsLib.MIN_EVM_CONFIRMATIONS.toText() # "+)"
+                  );
+                }, 0)
+              } else {
+                let decimals = switch (PaymentsLib.getTokenDisplayInfo(token)) {
+                  case null 6;
+                  case (?info) info.decimals;
+                };
+                let amt = rawAmountToFloat(parsed.amountRaw.toText(), decimals);
+                ({
+                  status             = #verified;
+                  txHash;
+                  confirmedAmount    = amt;
+                  confirmedRecipient = parsed.recipient;
+                  blockNumber        = parsed.blockNumber;
+                  errorReason        = null;
+                }, parsed.amountRaw)
+              };
+            };
+          };
+        } else {
+          switch (PaymentsLib.parseEvmResponse(json)) {
+            case null {
+              ({
+                status             = #failed;
+                txHash;
+                confirmedAmount    = 0.0;
+                confirmedRecipient = "";
+                blockNumber        = 0;
+                errorReason        = ?(networkLabel # ": transaction not found or parse failed");
+              }, 0)
+            };
+            case (?parsed) {
+              if (parsed.recipient == "" and parsed.blockNumber == 0) {
+                ({
+                  status             = #failed;
+                  txHash;
+                  confirmedAmount    = 0.0;
+                  confirmedRecipient = "";
+                  blockNumber        = 0;
+                  errorReason        = ?(networkLabel # ": transaction failed on-chain (status != 0x1)");
+                }, 0)
+              } else {
+                // Receipt-only EVM path — amount log parsing deferred; LG-09 gate rejects amountRaw=0.
+                ({
+                  status             = #verified;
+                  txHash;
+                  confirmedAmount    = 0.0;
+                  confirmedRecipient = parsed.recipient;
+                  blockNumber        = parsed.blockNumber;
+                  errorReason        = null;
+                }, 0)
+              };
+            };
           };
         }
       };
     }
+  };
+
+  /// Explorer-only verification entry point (E3.S10 / E4.S2 alias).
+  public shared ({ caller }) func verifyTradePaymentExplorer(
+    tradeId : Types.TradeId,
+    txHash  : Text,
+    network : Types.TradeToken,
+  ) : async Types.Result<Types.PaymentVerificationResult> {
+    await verifyPayment(tradeId, txHash, network)
   };
 
   // ─── Token metadata ────────────────────────────────────────────────────────
@@ -649,9 +766,6 @@ mixin (
 
   // ─── Address verification cache helpers ───────────────────────────────────
 
-  /// 24 hours in nanoseconds
-  let ADDRESS_VERIFY_TTL_NS : Int = 86_400_000_000_000;
-
   /// Build the cache key: address # "#" # network
   func addrCacheKey(address : Text, network : Text) : Text {
     address # "#" # network
@@ -663,8 +777,8 @@ mixin (
     switch (addressVerifyCache.get(key)) {
       case null null;
       case (?v) {
-        let age = Time.now() - v.verifiedAt;
-        if (age < ADDRESS_VERIFY_TTL_NS) ?v else null
+        let age = Types.now() - v.verifiedAt;
+        if (age < PaymentsLib.ADDRESS_VERIFY_TTL_NS) ?v else null
       };
     }
   };
@@ -672,18 +786,34 @@ mixin (
   /// Store a verification result in the cache.
   func setCachedVerification(address : Text, network : Text, v : Types.AddressVerification) {
     let key = addrCacheKey(address, network);
+    if (addressVerifyCache.size() >= PaymentsLib.MAX_ADDRESS_VERIFY_CACHE_ENTRIES) {
+      var removed = false;
+      let now = Types.now();
+      for ((cachedKey, cachedValue) in addressVerifyCache.entries()) {
+        if (not removed and now >= cachedValue.expiresAt) {
+          addressVerifyCache.remove(cachedKey);
+          removed := true;
+        };
+      };
+      if (not removed) {
+        label first for ((cachedKey, _) in addressVerifyCache.entries()) {
+          addressVerifyCache.remove(cachedKey);
+          break first;
+        };
+      };
+    };
     addressVerifyCache.add(key, v);
   };
 
   /// Build an AddressVerification record from raw values.
   func makeVerification(active : Bool, txCount : Nat) : Types.AddressVerification {
-    let now = Time.now();
+    let now = Types.now();
     {
       level      = 2;
       active;
       txCount;
       verifiedAt = now;
-      expiresAt  = now + ADDRESS_VERIFY_TTL_NS;
+      expiresAt  = now + PaymentsLib.ADDRESS_VERIFY_TTL_NS;
     }
   };
 
@@ -752,17 +882,35 @@ mixin (
 
   // ─── verifyEvmAddress ─────────────────────────────────────────────────────
 
+  func isValidEvmAddress(address : Text) : Bool {
+    address.size() == 42 and address.startsWith(#text "0x")
+  };
+
+  func isValidTronAddress(address : Text) : Bool {
+    address.size() == 34 and address.startsWith(#text "T")
+  };
+
+  func isValidSolanaAddress(address : Text) : Bool {
+    let len = address.size();
+    len >= 32 and len <= 44
+  };
+
   /// Verifies an EVM-compatible address by checking transaction history via
   /// the appropriate block explorer API (BSCScan, Etherscan, PolygonScan, SnowTrace).
   /// network must be one of: "bsc", "ethereum", "polygon", "avalanche".
   /// Results are cached for 24 hours.
   /// If the API key for the network is not configured, returns a pass-through result
   /// (active=true, txCount=0) — this never blocks address addition.
-  public shared func verifyEvmAddress(
+  public shared ({ caller }) func verifyEvmAddress(
     address : Text,
     network : Text,
   ) : async Types.Result<{ active : Bool; txCount : Nat; verifiedAt : Types.Timestamp }> {
     obsRecordCall();
+    Auth.assertNotAnonymous(caller);
+
+    if (not isValidEvmAddress(address)) {
+      return #err(#invalid_input("Invalid EVM address format."));
+    };
 
     // Check cache first
     switch (getCachedVerification(address, network)) {
@@ -840,10 +988,15 @@ mixin (
   /// Verifies a Tron (TRC20) address by checking transaction history via TronGrid.
   /// Results are cached for 24 hours.
   /// If tronGridApiKey is not configured, returns a pass-through result.
-  public shared func verifyTronAddress(
+  public shared ({ caller }) func verifyTronAddress(
     address : Text,
   ) : async Types.Result<{ active : Bool; txCount : Nat; verifiedAt : Types.Timestamp }> {
     obsRecordCall();
+    Auth.assertNotAnonymous(caller);
+
+    if (not isValidTronAddress(address)) {
+      return #err(#invalid_input("Invalid Tron address format."));
+    };
 
     switch (getCachedVerification(address, "tron")) {
       case (?v) {
@@ -897,10 +1050,15 @@ mixin (
   /// Verifies a Solana (SPL) address by checking signature history via getSignaturesForAddress.
   /// Results are cached for 24 hours.
   /// If solanaRpcUrl is not configured, uses the public mainnet endpoint.
-  public shared func verifySolanaAddress(
+  public shared ({ caller }) func verifySolanaAddress(
     address : Text,
   ) : async Types.Result<{ active : Bool; txCount : Nat; verifiedAt : Types.Timestamp }> {
     obsRecordCall();
+    Auth.assertNotAnonymous(caller);
+
+    if (not isValidSolanaAddress(address)) {
+      return #err(#invalid_input("Invalid Solana address format."));
+    };
 
     switch (getCachedVerification(address, "solana")) {
       case (?v) {
@@ -995,6 +1153,7 @@ mixin (
     if (caller.isAnonymous()) {
       return #err(#unauthorized);
     };
+    Auth.assertCallerNotBanned(users, caller);
 
     // Validate address format
     if (not isValidAddressFormat(address, token)) {
@@ -1008,7 +1167,7 @@ mixin (
         switch (network) {
           case "tron"      await verifyTronAddress(address);
           case "solana"    await verifySolanaAddress(address);
-          case "icp"       #ok({ active = true; txCount = 0; verifiedAt = Time.now() });
+          case "icp"       #ok({ active = true; txCount = 0; verifiedAt = Types.now() });
           case net         await verifyEvmAddress(address, net);
         };
       switch (verResult) {
@@ -1019,7 +1178,7 @@ mixin (
             active     = r.active;
             txCount    = r.txCount;
             verifiedAt = r.verifiedAt;
-            expiresAt  = r.verifiedAt + ADDRESS_VERIFY_TTL_NS;
+            expiresAt  = r.verifiedAt + PaymentsLib.ADDRESS_VERIFY_TTL_NS;
           }
         };
       }
@@ -1030,8 +1189,9 @@ mixin (
     let pm : Types.PaymentMethod = {
       token;
       address;
-      addedAt      = Time.now();
+      addedAt      = Types.now();
       verification = verificationOpt;
+      walletLinkId = 0;
     };
 
     // Load user and append payment method
@@ -1053,8 +1213,30 @@ mixin (
 
   // ─── getPaymentMethods ────────────────────────────────────────────────────
 
+  /// Returns seller payment methods for a trade token. Buyer-only (trade party).
+  public shared query ({ caller }) func getSellerPaymentMethodsForTrade(
+    tradeId : Types.TradeId,
+  ) : async [Types.PaymentMethod] {
+    if (caller.isAnonymous()) return [];
+    switch (trades.get(tradeId)) {
+      case null [];
+      case (?trade) {
+        if (not Principal.equal(caller, trade.buyer)) return [];
+        switch (users.get(trade.seller)) {
+          case null [];
+          case (?seller) {
+            seller.paymentMethods.filter(func(pm : Types.PaymentMethod) : Bool {
+              pm.token == trade.token
+            })
+          };
+        };
+      };
+    };
+  };
+
+  // ─── getPaymentMethods ────────────────────────────────────────────────────
+
   /// Returns all saved payment methods for the authenticated caller.
-  /// Returns an empty array if the user is not found or not authenticated.
   public shared query ({ caller }) func getPaymentMethods() : async [Types.PaymentMethod] {
     if (caller.isAnonymous()) return [];
     switch (users.get(caller)) {

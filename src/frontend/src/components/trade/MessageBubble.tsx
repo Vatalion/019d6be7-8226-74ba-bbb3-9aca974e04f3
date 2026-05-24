@@ -1,4 +1,5 @@
 import type { MediaAttachment, Message } from "@/backend.d";
+import { safeHttpUrl, trimUrlPunctuation } from "@/utils/safeUrl";
 import { Paperclip } from "lucide-react";
 import { useState } from "react";
 import { LightboxGallery } from "./LightboxGallery";
@@ -23,17 +24,25 @@ function AttachmentItem({
   idx: number;
   onImageClick: (url: string) => void;
 }) {
+  const safeUrl = safeHttpUrl(att.url);
   if (att.mimeType.startsWith("image/")) {
+    if (!safeUrl) {
+      return (
+        <p className="text-xs text-muted-foreground italic">
+          {att.fileName} (unsupported link)
+        </p>
+      );
+    }
     return (
       <button
         type="button"
         className="w-full p-0 border-0 bg-transparent cursor-pointer"
-        onClick={() => onImageClick(att.url)}
+        onClick={() => onImageClick(safeUrl)}
         aria-label={`View ${att.fileName}`}
         data-ocid={`chat-image-attachment.${idx + 1}`}
       >
         <img
-          src={att.url}
+          src={safeUrl}
           alt={att.fileName}
           className="max-h-48 sm:max-h-60 rounded-lg object-cover w-full"
         />
@@ -41,9 +50,16 @@ function AttachmentItem({
     );
   }
   if (att.mimeType.startsWith("video/")) {
+    if (!safeUrl) {
+      return (
+        <p className="text-xs text-muted-foreground italic">
+          {att.fileName} (unsupported link)
+        </p>
+      );
+    }
     return (
       <video
-        src={att.url}
+        src={safeUrl}
         controls
         className="max-h-48 sm:max-h-60 rounded-lg w-full"
         data-ocid={`chat-video-attachment.${idx + 1}`}
@@ -70,7 +86,9 @@ export function MessageBubble({
 
   // Extract first URL from message content for link preview
   const urlMatch = message.content.match(URL_REGEX);
-  const firstUrl = urlMatch ? urlMatch[0] : null;
+  const firstUrl = urlMatch
+    ? safeHttpUrl(trimUrlPunctuation(urlMatch[0]))
+    : null;
 
   return (
     <>

@@ -1,3 +1,4 @@
+import { CategoryGrid } from "@/components/marketplace/CategoryGrid";
 import {
   ListingCard,
   ListingCardSkeleton,
@@ -7,18 +8,18 @@ import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/hooks/useAuth";
 import { useBackend } from "@/hooks/useBackend";
 import { useLocale } from "@/hooks/useLocale";
+import { searchListingsWithCategory } from "@/lib/marketplaceActor";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
   ArrowRight,
   FileText,
   LogIn,
+  RefreshCw,
   ShieldCheck,
   Sparkles,
   Wallet,
 } from "lucide-react";
-import { CategoryGrid } from "@/components/marketplace/CategoryGrid";
-import { searchListingsWithCategory } from "@/lib/marketplaceActor";
 import { motion } from "motion/react";
 
 // ─── featured listings hook ─────────────────────────────────────────────────
@@ -29,26 +30,22 @@ function useFeaturedListings() {
     queryKey: ["listings", "featured"],
     queryFn: async () => {
       if (!actor) return [];
-      try {
-        return await searchListingsWithCategory(actor, {
-          query: null,
-          category: null,
-          categoryId: null,
-          priceMin: null,
-          priceMax: null,
-          location: null,
-          condition: null,
-          shippingCarrier: null,
-          offset: 0n,
-          limit: 6n,
-          priceToken: null,
-        });
-      } catch (err) {
-        console.warn("[useFeaturedListings] searchListings failed:", err);
-        return [];
-      }
+      return searchListingsWithCategory(actor, {
+        query: null,
+        category: null,
+        categoryId: null,
+        priceMin: null,
+        priceMax: null,
+        location: null,
+        condition: null,
+        shippingCarrier: null,
+        offset: 0n,
+        limit: 6n,
+        priceToken: null,
+      });
     },
     enabled: !isFetching,
+    staleTime: 60_000,
     retry: 2,
     retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10_000),
   });
@@ -168,7 +165,7 @@ function HeroSection() {
 // ─── featured listings section ───────────────────────────────────────────────
 
 function FeaturedListings() {
-  const { data: listings, isLoading, isError } = useFeaturedListings();
+  const { data: listings, isLoading, isError, refetch } = useFeaturedListings();
   const { t } = useLocale();
   const navigate = useNavigate();
 
@@ -213,9 +210,13 @@ function FeaturedListings() {
         {isError && (
           <div
             data-ocid="listings-error"
-            className="text-center py-12 text-muted-foreground"
+            className="text-center py-12 flex flex-col items-center gap-3"
           >
-            {t("listings.loadFailed")}
+            <p className="text-muted-foreground">{t("listings.loadFailed")}</p>
+            <Button variant="outline" size="sm" onClick={() => void refetch()}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              {t("detail.retry")}
+            </Button>
           </div>
         )}
 
@@ -408,10 +409,7 @@ function PaymentsGuideSection() {
     {
       title: t("paymentsGuide.phase2.title"),
       body: t("paymentsGuide.phase2.body"),
-      items: [
-        t("paymentsGuide.phase2.item1"),
-        t("paymentsGuide.phase2.item2"),
-      ],
+      items: [t("paymentsGuide.phase2.item1"), t("paymentsGuide.phase2.item2")],
     },
   ];
 

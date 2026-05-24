@@ -1,32 +1,240 @@
 import Map "mo:core/Map";
+import List "mo:core/List";
+import Queue "mo:core/Queue";
+import Set "mo:core/Set";
+import Principal "mo:core/Principal";
 import Types "types";
+import Admin "lib/Admin";
+import MessagingLib "lib/Messaging";
+import GovernanceLib "lib/Governance";
+import TreasuryLib "lib/Treasury";
+import InsuranceReserveLib "lib/InsuranceReserve";
+import WalletLink "lib/WalletLink";
+import StakeLib "lib/Stake";
+import Obs "lib/Observability";
+import PaymentsLib "lib/Payments";
+import VaultLib "lib/Vault";
+import VaultBalances "lib/VaultBalances";
 
-/// Upgrade migration for Caffeine stable-memory compatibility.
-///
-/// Live canister (draft v98+) already stores `Types.Listing` with Phase B fields
-/// (`categoryId`, `bumpedAt`, `promotedUntil`). Older migration shapes that used
-/// `LegacyListing` without those fields fail the stable check (M0170).
+/// v107 deployed (ef198c5d) → v108+ (official object-storage mixin, reset state).
+/// Pre-alpha: discard canister state on upgrade.
+/// OldActor matches v107 stable layout — no vendored object-storage fields.
 module {
 
-  type OldActor = {
-    listings     : Map.Map<Types.ListingId, Types.Listing>;
+  type ActorState = {
+    addressVerifyCache : Map.Map<Text, Types.AddressVerification>;
+    auditLog : List.List<Admin.AuditEntry>;
+    cancelProposals : Map.Map<Types.TradeId, Set.Set<Principal>>;
+    complianceNotes : Map.Map<Types.UserId, List.List<Admin.ComplianceNote>>;
+    disputes : Map.Map<Types.DisputeId, Types.Dispute>;
+    errorLog : List.List<Obs.ErrorLogEntry>;
+    favorites : Map.Map<Types.UserId, Set.Set<Types.ListingId>>;
+    feedbacks : Map.Map<Types.FeedbackId, Types.Feedback>;
+    govRateLimitMap : Map.Map<Principal, (Nat, Types.Timestamp)>;
+    inquiries : Map.Map<Types.ListingInquiryId, Types.ListingInquiry>;
+    inquiryIndex : Map.Map<Types.ListingInquiryId, List.List<Types.ListingInquiryMessageId>>;
+    inquiryKeyIndex : Map.Map<Text, Types.ListingInquiryId>;
+    inquiryMessages : Map.Map<Types.ListingInquiryMessageId, Types.ListingInquiryMessage>;
+    insuranceAccruals : Map.Map<Types.TradeId, InsuranceReserveLib.AccrualRecord>;
+    insuranceDailyPaid : Map.Map<Principal, (Nat, Types.Timestamp)>;
+    insuranceLedger : { var value : Nat };
+    insurancePayouts : Map.Map<Nat, InsuranceReserveLib.PayoutRequest>;
+    jurors : Map.Map<Principal, Types.JurorEntry>;
+    juryMap : Map.Map<Types.DisputeId, Types.JuryAssignment>;
+    lastReadPtrs : Map.Map<MessagingLib.ReadKey, Types.Timestamp>;
+    liabilityRecords : Map.Map<Nat, Types.LiabilityRecord>;
+    linkPreviewCache : Map.Map<Text, Types.LinkPreview>;
+    listingStakes : Map.Map<Types.ListingId, Types.ListingStakeRecord>;
+    listings : Map.Map<Types.ListingId, Types.Listing>;
+    messages : Map.Map<Types.MessageId, Types.Message>;
+    moduleMetrics : Map.Map<Text, Obs.ModuleMetrics>;
+    nextAuditId : { var value : Nat };
+    nextDigitalFileVersionId : { var value : Nat };
+    nextDisputeId : { var value : Nat };
+    nextErrorId : { var value : Nat };
+    nextFeedbackId : { var value : Nat };
+    nextInquiryId : { var value : Nat };
+    nextInquiryMsgId : { var value : Nat };
+    nextInsurancePayoutId : { var value : Nat };
+    nextLiabilityId : { var value : Nat };
+    nextLinkedWalletId : { var value : Nat };
+    nextListingId : { var value : Nat };
+    nextMessageId : { var value : Nat };
+    nextNoteId : { var value : Nat };
+    nextNotificationId : { var value : Nat };
+    nextProposalId : { var value : Nat };
     nextReportId : { var value : Nat };
-    reports      : Map.Map<Nat, Types.ListingReport>;
+    nextSavedSearchId : { var value : Nat };
+    nextTradeId : { var value : Nat };
+    nextWalletChallengeId : { var value : Nat };
+    nextWaybillSeed : { var value : Nat };
+    nextWithdrawalId : { var value : Nat };
+    notifications : Map.Map<Principal, List.List<Types.NotificationEvent>>;
+    paymentErrorLog : Queue.Queue<Admin.PaymentVerificationError>;
+    processingTrades : Map.Map<Types.TradeId, Bool>;
+    proposals : List.List<GovernanceLib.Proposal>;
+    rateCache : Map.Map<Types.TradeToken, PaymentsLib.RateCacheEntry>;
+    rateLimitAddEvidence : Map.Map<Principal, (Nat, Types.Timestamp)>;
+    rateLimitConfirmPayment : Map.Map<Principal, (Nat, Types.Timestamp)>;
+    rateLimitCreateListing : Map.Map<Principal, (Nat, Types.Timestamp)>;
+    rateLimitDigitalUpload : Map.Map<Principal, (Nat, Types.Timestamp)>;
+    rateLimitInitiateTrade : Map.Map<Principal, (Nat, Types.Timestamp)>;
+    rateLimitInquiry : Map.Map<Principal, (Nat, Types.Timestamp)>;
+    rateLimitListingMutations : Map.Map<Principal, (Nat, Types.Timestamp)>;
+    rateLimitOpenDispute : Map.Map<Principal, (Nat, Types.Timestamp)>;
+    rateLimitSendMessage : Map.Map<Principal, (Nat, Types.Timestamp)>;
+    rateLimitStakeOps : Map.Map<Principal, (Nat, Types.Timestamp)>;
+    rateLimitState : Map.Map<Principal, (Nat, Types.Timestamp)>;
+    rateLimitVerify : Map.Map<Types.TradeId, (Nat, Types.Timestamp)>;
+    reports : Map.Map<Nat, Types.ListingReport>;
+    requestLog : List.List<Obs.RequestMetric>;
+    savedSearches : Map.Map<Types.UserId, List.List<Types.SavedSearch>>;
+    selfPrincipal : { var value : Principal };
+    shippingCache : Map.Map<Text, (Text, Types.Timestamp)>;
+    spamTracker : Map.Map<Types.UserId, Types.Timestamp>;
+    stakeBalances : Map.Map<StakeLib.StakeKey, Types.StakeBalance>;
+    systemSettings : Admin.SystemSettings;
+    trackingTimelines : Map.Map<Types.TradeId, [Types.TrackingTimelineEntry]>;
+    tradeIndex : Map.Map<Types.TradeId, List.List<Types.MessageId>>;
+    trades : Map.Map<Types.TradeId, Types.Trade>;
+    treasuryFees : Map.Map<Types.TradeId, TreasuryLib.FeeRecord>;
+    treasuryId : { var value : Principal };
+    treasuryWithdrawals : List.List<TreasuryLib.WithdrawalRecord>;
+    usedPaymentTxHashes : Map.Map<Text, Types.TradeId>;
+    userFeedbackIndex : Map.Map<Types.UserId, List.List<Types.FeedbackId>>;
+    users : Map.Map<Types.UserId, Types.User>;
+    vaultAddressCache : Map.Map<VaultLib.CacheKey, VaultLib.VaultAddress>;
+    vaultBalanceCache : Map.Map<VaultBalances.BalanceCacheKey, VaultBalances.BalanceResult>;
+    walletLinkChallenges : Map.Map<Nat, WalletLink.ChallengeRecord>;
   };
 
-  type NewActor = {
-    listings     : Map.Map<Types.ListingId, Types.Listing>;
-    nextReportId : { var value : Nat };
-    reports      : Map.Map<Nat, Types.ListingReport>;
-  };
+  type OldActor = ActorState;
 
-  /// Identity on listings/reports when the deployed shape already matches `Types`.
-  public func run(old : OldActor) : NewActor {
+  type NewActor = ActorState;
+
+  func freshSystemSettings() : Admin.SystemSettings {
     {
-      listings = old.listings;
-      nextReportId = old.nextReportId;
-      reports = old.reports;
+      var minTradeAmountUSD = 1;
+      var paymentTimeoutHours = 24;
+      var allowedTokens = [#USDT_TRC20, #USDT_BEP20, #USDT_ERC20, #USDC_ERC20];
+      var maxListingPriceUSD = 1_000_000;
+      var novaPoshtaApiKey = "";
+      var ukrPoshtaApiKey = "";
+      var meestApiKey = "";
+      var tronGridApiKey = "";
+      var bscScanApiKey = "";
+      var infuraApiKey = "";
+      var solanaRpcUrl = "";
+      var polygonApiKey = "";
+      var avalancheApiKey = "";
+      var ckUsdcLedgerId = "xevnm-gaaaa-aaaar-qafnq-cai";
+      var ckUsdtLedgerId = "cngnf-vqaaa-aaaar-qag4q-cai";
+      var trustlessEscrowEnabled = false;
+      var gateCTestnetE2ePassed = false;
+      var gateCRollbackTestsPassed = false;
+      var gateCSubaccountDesignReviewed = false;
+      var gateCBetaCapsConfigured = false;
+      var gateCSecuritySignOffRef = "";
+      var ckOnChainBetaCapUsdCents = 50_000;
+      var platformFeeBps = 0;
+      var stakeOnChainEnabled = false;
+      var cyclesBalanceThreshold = 1_000_000_000_000;
+      var errorRateThreshold = 5.0;
     }
+  };
+
+  func freshState() : NewActor {
+    {
+      addressVerifyCache = Map.empty();
+      auditLog = List.empty();
+      cancelProposals = Map.empty();
+      complianceNotes = Map.empty();
+      disputes = Map.empty();
+      errorLog = List.empty();
+      favorites = Map.empty();
+      feedbacks = Map.empty();
+      govRateLimitMap = Map.empty();
+      inquiries = Map.empty();
+      inquiryIndex = Map.empty();
+      inquiryKeyIndex = Map.empty();
+      inquiryMessages = Map.empty();
+      insuranceAccruals = Map.empty();
+      insuranceDailyPaid = Map.empty();
+      insuranceLedger = { var value = 0 };
+      insurancePayouts = Map.empty();
+      jurors = Map.empty();
+      juryMap = Map.empty();
+      lastReadPtrs = Map.empty();
+      liabilityRecords = Map.empty();
+      linkPreviewCache = Map.empty();
+      listingStakes = Map.empty();
+      listings = Map.empty();
+      messages = Map.empty();
+      moduleMetrics = Map.empty();
+      nextAuditId = { var value = 0 };
+      nextDigitalFileVersionId = { var value = 1 };
+      nextDisputeId = { var value = 0 };
+      nextErrorId = { var value = 0 };
+      nextFeedbackId = { var value = 0 };
+      nextInquiryId = { var value = 0 };
+      nextInquiryMsgId = { var value = 0 };
+      nextInsurancePayoutId = { var value = 0 };
+      nextLiabilityId = { var value = 1 };
+      nextLinkedWalletId = { var value = 0 };
+      nextListingId = { var value = 0 };
+      nextMessageId = { var value = 0 };
+      nextNoteId = { var value = 0 };
+      nextNotificationId = { var value = 0 };
+      nextProposalId = { var value = 0 };
+      nextReportId = { var value = 0 };
+      nextSavedSearchId = { var value = 0 };
+      nextTradeId = { var value = 0 };
+      nextWalletChallengeId = { var value = 0 };
+      nextWaybillSeed = { var value = 0 };
+      nextWithdrawalId = { var value = 0 };
+      notifications = Map.empty();
+      paymentErrorLog = Queue.empty();
+      processingTrades = Map.empty();
+      proposals = List.empty();
+      rateCache = Map.empty();
+      rateLimitAddEvidence = Map.empty();
+      rateLimitConfirmPayment = Map.empty();
+      rateLimitCreateListing = Map.empty();
+      rateLimitDigitalUpload = Map.empty();
+      rateLimitInitiateTrade = Map.empty();
+      rateLimitInquiry = Map.empty();
+      rateLimitListingMutations = Map.empty();
+      rateLimitOpenDispute = Map.empty();
+      rateLimitSendMessage = Map.empty();
+      rateLimitStakeOps = Map.empty();
+      rateLimitState = Map.empty();
+      rateLimitVerify = Map.empty();
+      reports = Map.empty();
+      requestLog = List.empty();
+      savedSearches = Map.empty();
+      selfPrincipal = { var value = Principal.anonymous() };
+      shippingCache = Map.empty();
+      spamTracker = Map.empty();
+      stakeBalances = Map.empty();
+      systemSettings = freshSystemSettings();
+      trackingTimelines = Map.empty();
+      tradeIndex = Map.empty();
+      trades = Map.empty();
+      treasuryFees = Map.empty();
+      treasuryId = { var value = Principal.anonymous() };
+      treasuryWithdrawals = List.empty();
+      usedPaymentTxHashes = Map.empty();
+      userFeedbackIndex = Map.empty();
+      users = Map.empty();
+      vaultAddressCache = Map.empty();
+      vaultBalanceCache = Map.empty();
+      walletLinkChallenges = Map.empty();
+    }
+  };
+
+  public func run(_old : OldActor) : NewActor {
+    ignore _old.users.size();
+    freshState()
   };
 
 };

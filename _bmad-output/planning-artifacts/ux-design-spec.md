@@ -13,7 +13,7 @@ document_output_language: en
 
 1. **OLX familiarity** — browse → card grid → detail → CTA; minimal crypto jargon on first screen.
 2. **Progressive disclosure** — network/token selection only when creating listing or paying.
-3. **Honest payment UX** — show steps: send → confirm sent → seller confirms (Phase 1).
+3. **Honest payment UX** — show steps: buy request → seller 24h confirm → PaymentIntent → explorer verification/fund lock → fulfillment.
 4. **Pseudonymity** — show username and reputation, not legal identity.
 5. **Bilingual** — UK default-friendly; EN parity in `i18n/index.ts`.
 
@@ -29,20 +29,20 @@ document_output_language: en
 | `/admin` | Ops | Live |
 | `/governance`, `/vault`, `/jurors` | Deferred product | Hidden/low priority |
 
-## Phase 1 UX locks
+## Phase 1.5 UX locks
 
-- **Physical delivery:** only self-pickup (`deliveryPolicy.ts`).
-- **Tokens:** four approved networks on marketing surfaces.
+- **Physical delivery:** Nova Poshta only once E7.S3 ships; self-pickup/meetup remain hidden/deferred.
+- **Tokens:** four approved networks on marketing surfaces; Wave 1 manual settlement enables TRC20/BEP20 only.
 
 ## Flows for QA (Caffeine)
 
-See caffeine-cli project `.caf/projects/cryptomarket-p2p--.../verification/flow-templates.json`.
+Use flow ids from `traceability-matrix.md`; the template file lives in Caffeine project state, not this workspace clone.
 
 Authenticated flows require II profile bootstrap (headed).
 
 ## Excluded from old UX docs
 
-- Flutter widget keys, Patrol tests, mobile navigation patterns from `crypto_market/docs/ux-ui/`.
+- Old mobile implementation test keys and navigation patterns from source-project UX docs.
 - Carrier comparison 3-column grid as **default** path (deferred).
 
 ## UX debt

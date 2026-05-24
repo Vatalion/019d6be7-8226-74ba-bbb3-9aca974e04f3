@@ -39,6 +39,15 @@ func makeSettings() : Admin.SystemSettings {
     var avalancheApiKey          = "";
     var ckUsdcLedgerId           = "xevnm-gaaaa-aaaar-qafnq-cai";
     var ckUsdtLedgerId           = "cngnf-vqaaa-aaaar-qag4q-cai";
+    var trustlessEscrowEnabled   = false;
+    var gateCTestnetE2ePassed      = false;
+    var gateCRollbackTestsPassed   = false;
+    var gateCSubaccountDesignReviewed = false;
+    var gateCBetaCapsConfigured    = false;
+    var gateCSecuritySignOffRef      = "";
+    var ckOnChainBetaCapUsdCents     = 50_000;
+    var platformFeeBps           = 0;
+    var stakeOnChainEnabled      = false;
     var cyclesBalanceThreshold   = 1_000_000_000_000;
     var errorRateThreshold       = 5.0;
   }
@@ -54,12 +63,17 @@ func insertAdmin(users : Map.Map<Types.UserId, Types.User>, id : Principal) {
     var role             = #admin;
     createdAt            = 0;
     var reputationScore  = 0;
+    var buyerScore           = 0;
+    var sellerScore          = 0;
     var trustLevel       = #new_;
+    var kycTier          = #none;
     var isBanned         = false;
     var suspendedUntil   = null;
     var liabilityBalance = 0;
     var liabilityHistory = [];
     var paymentMethods   = [];
+    var linkedWallets    = [];
+    var accountClosedAt  = null;
   };
   users.add(id, user);
 };
@@ -74,12 +88,17 @@ func insertUser(users : Map.Map<Types.UserId, Types.User>, id : Principal) {
     var role             = #user;
     createdAt            = 0;
     var reputationScore  = 0;
+    var buyerScore           = 0;
+    var sellerScore          = 0;
     var trustLevel       = #new_;
+    var kycTier          = #none;
     var isBanned         = false;
     var suspendedUntil   = null;
     var liabilityBalance = 0;
     var liabilityHistory = [];
     var paymentMethods   = [];
+    var linkedWallets    = [];
+    var accountClosedAt  = null;
   };
   users.add(id, user);
 };
@@ -251,6 +270,7 @@ suite("Admin — reportListing", func() {
       var digitalPassword = null;
       var digitalFileUrlEncrypted = null;
       var digitalPasswordEncrypted = null;
+      var digitalFileAsset = null;
       var status = #active;
       createdAt = 0;
       var expiresAt = 999_999_999_999_999_999;
@@ -262,6 +282,7 @@ suite("Admin — reportListing", func() {
       var resolvedAt = null;
       var bumpedAt = 0;
       var promotedUntil = null;
+      var attributes       = [];
     };
     listings.add(1, listing);
     let (newId, result) = Admin.reportListing(
@@ -300,6 +321,7 @@ suite("Admin — reportListing", func() {
       var digitalPassword = null;
       var digitalFileUrlEncrypted = null;
       var digitalPasswordEncrypted = null;
+      var digitalFileAsset = null;
       var status = #active;
       createdAt = 0;
       var expiresAt = 1;
@@ -311,6 +333,7 @@ suite("Admin — reportListing", func() {
       var resolvedAt = null;
       var bumpedAt = 0;
       var promotedUntil = null;
+      var attributes       = [];
     };
     listings.add(1, listing);
     let (_newId, result) = Admin.reportListing(
@@ -361,5 +384,81 @@ suite("Admin — getSystemSettings", func() {
     // try/catch not valid in non-async test callbacks — trap test skipped
     let settings = makeSettings();
     ignore settings;
+  });
+});
+
+suite("Admin — Gate C checklist (E9.S6)", func() {
+  func completeChecklist(settings : Admin.SystemSettings) {
+    settings.gateCTestnetE2ePassed := true;
+    settings.gateCRollbackTestsPassed := true;
+    settings.gateCSubaccountDesignReviewed := true;
+    settings.gateCBetaCapsConfigured := true;
+    settings.ckOnChainBetaCapUsdCents := 50_000;
+  };
+
+  test("enable rejected when checklist incomplete", func() {
+    let users    = makeUsers();
+    let auditLog = makeAuditLog();
+    let settings = makeSettings();
+    insertAdmin(users, adminPrincipal);
+    switch (
+      Admin.setTrustlessEscrowEnabled(
+        users, settings, auditLog, 0, adminPrincipal, true, "SEC-2026-001",
+      )
+    ) {
+      case (#ok(_)) assert false;
+      case (#err(#invalid_input(_))) {};
+      case (#err(_)) assert false;
+    };
+    expect.bool(settings.trustlessEscrowEnabled).isFalse();
+  });
+
+  test("enable succeeds with complete checklist and sign-off", func() {
+    let users    = makeUsers();
+    let auditLog = makeAuditLog();
+    let settings = makeSettings();
+    insertAdmin(users, adminPrincipal);
+    completeChecklist(settings);
+    switch (
+      Admin.setTrustlessEscrowEnabled(
+        users, settings, auditLog, 0, adminPrincipal, true, "SEC-2026-001",
+      )
+    ) {
+      case (#ok(id)) {
+        expect.nat(id).equal(1);
+        expect.bool(settings.trustlessEscrowEnabled).isTrue();
+        expect.text(settings.gateCSecuritySignOffRef).equal("SEC-2026-001");
+      };
+      case (#err(_)) assert false;
+    };
+  });
+
+  test("disable always allowed with in-flight trades note", func() {
+    let users    = makeUsers();
+    let auditLog = makeAuditLog();
+    let settings = makeSettings();
+    insertAdmin(users, adminPrincipal);
+    completeChecklist(settings);
+    ignore Admin.setTrustlessEscrowEnabled(
+      users, settings, auditLog, 0, adminPrincipal, true, "SEC-2026-001",
+    );
+    switch (
+      Admin.setTrustlessEscrowEnabled(
+        users, settings, auditLog, 1, adminPrincipal, false, "",
+      )
+    ) {
+      case (#ok(_)) {
+        expect.bool(settings.trustlessEscrowEnabled).isFalse();
+      };
+      case (#err(_)) assert false;
+    };
+  });
+
+  test("gateCChecklistView reflects completion", func() {
+    let settings = makeSettings();
+    completeChecklist(settings);
+    let view = Admin.gateCChecklistView(settings);
+    expect.bool(view.checklistComplete).isTrue();
+    expect.nat(view.ckBetaCapUsdCents).equal(50_000);
   });
 });

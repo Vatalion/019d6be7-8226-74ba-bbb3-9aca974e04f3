@@ -13,13 +13,16 @@
 | Share ad link | — | Done | Copy link on listing detail |
 | Report ad | — | Done | `reportListing` → admin audit |
 | In-app chat per deal | FR-30 | Done | Per-trade only (OLX often has chat) |
-| Favorites / watchlist | — | Deferred | Phase 2 |
-| Promoted ads | — | Out of scope MVP |
+| Favorites / watchlist | FR-70 | Done | `Engagement.mo`, `/favorites` |
+| Saved searches | FR-71 | Done | No email/push alerts MVP |
+| Pre-trade inquiry | FR-72 | Done | Before trade open |
+| Bump / admin promote | FR-73 | Done | Sort: promoted → bumped → created |
+| Promoted ads (OLX packages) | — | Partial | Admin promote only; no paid packages |
 | Phone reveal | — | Out of scope (II pseudonym) |
 | Pay in crypto | FR-20–23 | Done | Wallet-to-wallet Phase 1 |
 | Platform disputes | FR-40–41 | Done | Moderator path |
 | Shipping integrations | FR-51 | Deferred UI | Pickup-only MVP |
-| Trustless escrow | FR-25 | Phase 3 | See `TRUSTLESS-SETTLEMENT-DESIGN.md` |
+| Trustless escrow | FR-25 | Phase 3 | See `ONCHAIN-SETTLEMENT-DESIGN.md` |
 | Anonymous browsing | — | Partial | Public read; II for writes |
 | Pseudonymous identity | FR-1–2, NFR-5 | Done | II, no mandatory KYC |
 

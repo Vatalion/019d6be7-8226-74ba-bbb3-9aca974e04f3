@@ -21,7 +21,7 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 import type { UserProfile } from "../../backend.d";
-import { TrustLevel, UserRole } from "../../backend.d";
+import { KycTier, TrustLevel, UserRole } from "../../backend.d";
 import { useBackend } from "../../hooks/useBackend";
 import { useLocale } from "../../hooks/useLocale";
 import { formatPrincipal, formatTimestamp } from "../../lib/format";
@@ -136,6 +136,29 @@ export default function UserManagementTable() {
     onError: () => toast.error(t("admin.users.promoteFailed")),
   });
 
+  const kycMutation = useMutation({
+    mutationFn: async ({
+      userId,
+      tier,
+    }: { userId: UserProfile["id"]; tier: KycTier }) => {
+      if (!actor) throw new Error("No actor");
+      const result = await actor.adminSetUserKycTier(userId, tier);
+      if (
+        result &&
+        typeof result === "object" &&
+        "__kind__" in result &&
+        result.__kind__ === "err"
+      ) {
+        throw new Error("KYC update failed");
+      }
+    },
+    onSuccess: () => {
+      toast.success(t("admin.users.kycUpdated"));
+      queryClient.invalidateQueries({ queryKey: ["adminUsers"] });
+    },
+    onError: () => toast.error(t("admin.users.kycUpdateFailed")),
+  });
+
   const users = data?.items ?? [];
   const totalCount = data?.totalCount ?? 0n;
   const totalPages =
@@ -224,6 +247,9 @@ export default function UserManagementTable() {
                 <th className="px-4 py-3 text-right font-semibold text-foreground">
                   {t("admin.users.col.score")}
                 </th>
+                <th className="px-4 py-3 text-left font-semibold text-foreground">
+                  {t("admin.users.col.kyc")}
+                </th>
                 <th className="px-4 py-3 text-right font-semibold text-foreground">
                   {t("admin.users.col.registered")}
                 </th>
@@ -272,6 +298,15 @@ export default function UserManagementTable() {
                   <td className="px-4 py-3 text-right font-mono text-foreground">
                     {user.reputationScore.toString()}
                   </td>
+                  <td className="px-4 py-3">
+                    {user.kycTier === KycTier.verified ? (
+                      <span className="inline-flex items-center rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                        {t("profile.kyc.verified")}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right text-muted-foreground">
                     {formatTimestamp(user.createdAt).toLocaleDateString()}
                   </td>
@@ -301,6 +336,30 @@ export default function UserManagementTable() {
                           className="rounded px-2 py-1 text-xs font-medium text-primary hover:bg-primary/10 transition-colors"
                         >
                           <ShieldPlus className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                      {user.role === UserRole.user && (
+                        <button
+                          type="button"
+                          data-ocid="user-action-kyc"
+                          disabled={kycMutation.isPending}
+                          onClick={() =>
+                            kycMutation.mutate({
+                              userId: user.id,
+                              tier:
+                                user.kycTier === KycTier.verified
+                                  ? KycTier.none
+                                  : KycTier.verified,
+                            })
+                          }
+                          className="rounded px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-500/10 transition-colors dark:text-emerald-300"
+                          title={
+                            user.kycTier === KycTier.verified
+                              ? t("admin.users.action.revokeKyc")
+                              : t("admin.users.action.verifyKyc")
+                          }
+                        >
+                          {user.kycTier === KycTier.verified ? "KYC−" : "KYC+"}
                         </button>
                       )}
                     </div>

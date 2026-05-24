@@ -1,6 +1,7 @@
 import type { LiabilityEvent, UserProfile } from "@/backend.d";
-import { TrustLevel } from "@/backend.d";
+import { KycTier, TrustLevel } from "@/backend.d";
 import { FeedbackList } from "@/components/profile/FeedbackList";
+import { LinkedWalletsCard } from "@/components/profile/LinkedWalletsCard";
 import { ReputationStats } from "@/components/profile/ReputationStats";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +22,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/useAuth";
 import { useBackend } from "@/hooks/useBackend";
 import { formatPrincipal, formatTimestamp } from "@/lib/format";
+import { chainAmountToNumber } from "@/lib/tradeFeeQuote";
 import { Principal } from "@icp-sdk/core/principal";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
@@ -31,11 +33,13 @@ import {
   CheckCircle2,
   Copy,
   CreditCard,
+  Download,
   LayoutGrid,
   LinkIcon,
   Pencil,
   Shield,
   ShieldCheck,
+  Trash2,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -186,6 +190,140 @@ function PaymentMethodsCard({ methods }: { methods: PaymentMethod[] }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function jsonReplacer(_key: string, value: unknown) {
+  return typeof value === "bigint" ? value.toString() : value;
+}
+
+function PrivacyDataPanel({ profile }: { profile: UserProfile }) {
+  const { actor, isFetching } = useBackend();
+  const { t } = useLocale();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [confirmText, setConfirmText] = useState("");
+  const [exporting, setExporting] = useState(false);
+
+  const isClosed = profile.accountClosedAt != null;
+
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      if (!actor) throw new Error("Not ready");
+      const res = await actor.deleteMyAccount(confirmText.trim());
+      if (res.__kind__ === "err") {
+        throw new Error(String(res.err));
+      }
+    },
+    onSuccess: () => {
+      setConfirmText("");
+      toast.success(t("profile.privacy.deleteSuccess"));
+      void queryClient.invalidateQueries({ queryKey: ["myProfile"] });
+      void navigate({ to: "/listings" });
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || t("profile.privacy.deleteFailed"));
+    },
+  });
+
+  async function handleExport() {
+    if (!actor || isFetching) return;
+    setExporting(true);
+    try {
+      const bundle = await actor.exportMyAccountData();
+      const blob = new Blob([JSON.stringify(bundle, jsonReplacer, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `cryptomarket-export-${Date.now()}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success(t("profile.privacy.exportSuccess"));
+    } catch {
+      toast.error(t("profile.privacy.exportFailed"));
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  return (
+    <div
+      className="rounded-xl border border-border bg-card shadow-sm overflow-hidden"
+      data-ocid="privacy-data-panel"
+    >
+      <div className="px-4 py-3 border-b border-border bg-muted/20 flex items-center gap-2">
+        <Shield className="h-4 w-4 text-muted-foreground" />
+        <h3 className="text-sm font-semibold text-foreground">
+          {t("profile.privacy.title")}
+        </h3>
+      </div>
+
+      <div className="px-4 py-4 space-y-4">
+        <p className="text-sm text-muted-foreground">
+          {t("profile.privacy.description")}
+        </p>
+
+        {isClosed ? (
+          <p
+            className="text-sm text-muted-foreground rounded-md border border-dashed border-border p-3"
+            data-ocid="account-closed-notice"
+          >
+            {t("profile.privacy.closedNotice")}
+          </p>
+        ) : (
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={exporting || isFetching}
+              data-ocid="export-account-data"
+              onClick={() => void handleExport()}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              {exporting
+                ? t("profile.privacy.exporting")
+                : t("profile.privacy.export")}
+            </Button>
+
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 space-y-3">
+              <p className="text-sm font-medium text-foreground">
+                {t("profile.privacy.deleteTitle")}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {t("profile.privacy.deleteHint")}
+              </p>
+              <Input
+                value={confirmText}
+                onChange={(e) => setConfirmText(e.target.value)}
+                placeholder={t("profile.privacy.deletePlaceholder")}
+                data-ocid="delete-account-confirm"
+                autoComplete="off"
+              />
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                disabled={
+                  confirmText.trim() !== "DELETE" ||
+                  deleteMutation.isPending ||
+                  isFetching
+                }
+                data-ocid="delete-account-submit"
+                onClick={() => deleteMutation.mutate()}
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                {deleteMutation.isPending
+                  ? t("profile.privacy.deleting")
+                  : t("profile.privacy.delete")}
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -342,7 +480,8 @@ function LiabilityCard({
                             type="button"
                             onClick={() =>
                               navigate({
-                                to: `/trades/${ev.tradeId?.toString()}`,
+                                to: "/trades/$id",
+                                params: { id: String(ev.tradeId) },
                               })
                             }
                             className="text-accent hover:underline font-mono"
@@ -389,13 +528,21 @@ function ListingCardItem({
   const { t } = useLocale();
   const navigate = useNavigate();
   const photo = listing.photos[0];
-  const price = Number(listing.priceAmount) / 1e8;
+  const price = chainAmountToNumber(
+    listing.priceAmount,
+    listing.priceToken as string,
+  );
 
   return (
     <button
       type="button"
       data-ocid="profile-listing-card"
-      onClick={() => navigate({ to: `/listings/${listing.id}` })}
+      onClick={() =>
+        navigate({
+          to: "/listings/$id",
+          params: { id: String(listing.id) },
+        })
+      }
       className="card-elevated overflow-hidden text-left transition-smooth hover:scale-[1.01] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring relative"
     >
       <div className="aspect-[4/3] bg-muted flex items-center justify-center overflow-hidden">
@@ -730,9 +877,15 @@ export default function ProfilePage() {
   });
 
   const { data: allListings = [], isLoading: listingsLoading } = useQuery({
-    queryKey: ["userListings", targetPrincipal?.toText()],
+    queryKey: ["userListings", targetPrincipal?.toText(), isOwn],
     queryFn: () =>
-      actor!.getListingsByUser(targetPrincipal!, BigInt(0), BigInt(50)),
+      isOwn
+        ? actor!.getListingsByUser(targetPrincipal!, BigInt(0), BigInt(50))
+        : actor!.getPublicListingsByUser(
+            targetPrincipal!,
+            BigInt(0),
+            BigInt(50),
+          ),
     enabled: !!actor && !isFetching && !!targetPrincipal,
     staleTime: 30_000,
     gcTime: 300_000,
@@ -918,6 +1071,14 @@ export default function ProfilePage() {
                 >
                   {trustLevelLabel(trustLevel)}
                 </span>
+                {safeProfile.kycTier === KycTier.verified && (
+                  <span
+                    className="inline-flex items-center rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300"
+                    data-ocid="profile-kyc-badge"
+                  >
+                    {t("profile.kyc.verified")}
+                  </span>
+                )}
                 {isOwn && (
                   <Button
                     variant="outline"
@@ -998,6 +1159,12 @@ export default function ProfilePage() {
 
         {/* Payment methods — only shown to own profile */}
         {isOwn && <PaymentMethodsCard methods={paymentMethods} />}
+
+        {isOwn && <LinkedWalletsCard />}
+
+        {isOwn && safeProfile && (
+          <PrivacyDataPanel profile={safeProfile as UserProfile} />
+        )}
 
         <Separator />
 

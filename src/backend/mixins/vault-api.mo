@@ -20,6 +20,28 @@ mixin (
   systemSettings : Admin.SystemSettings,
 ) {
 
+  type VaultHttpResponse = {
+    status  : Nat;
+    headers : [{ name : Text; value : Text }];
+    body    : Blob;
+  };
+
+  /// Strips all response headers so all replicas agree on the same response.
+  public shared query func transformVaultResponse(
+    raw : { response : VaultHttpResponse; context : Blob },
+  ) : async VaultHttpResponse {
+    {
+      status  = raw.response.status;
+      headers = [];
+      body    = raw.response.body;
+    }
+  };
+
+  let vaultHttpTransform : ?VaultBalances.HttpTransform = ?{
+    function = transformVaultResponse;
+    context  = "".encodeUtf8();
+  };
+
   // ─── Shared types (Candid-safe, immutable) ────────────────────────────────
 
   public type ChainType = VaultLib.ChainType;
@@ -68,8 +90,9 @@ mixin (
   public shared ({ caller }) func getVaultAddresses() : async [VaultAddressView] {
     Auth.assertNotAnonymous(caller);
     ignore Auth.requireUser(users, caller);
-    let addrs = await VaultLib.getVaultAddresses(addressCache, caller);
-    addrs.map<VaultLib.VaultAddress, VaultAddressView>(toAddressView)
+    // Fail closed: the current derivation helper is not production-grade for
+    // EVM/TRON/Solana deposit addresses, so do not expose deposit targets.
+    []
   };
 
   // ─── Public update — refresh balance for one chain ───────────────────────
@@ -80,28 +103,13 @@ mixin (
   public shared ({ caller }) func refreshVaultBalance(chain : ChainType) : async BalanceView {
     Auth.assertNotAnonymous(caller);
     ignore Auth.requireUser(users, caller);
-
-    // Resolve address (must be derived first — getVaultAddresses must have been called)
-    let cacheKey = VaultLib.cacheKey(caller, chain);
-    let address = switch (addressCache.get(cacheKey)) {
-      case (?va) va.address;
-      case null  {
-        // Auto-derive if not cached yet
-        let va = await VaultLib.deriveAddress(addressCache, caller, chain);
-        va.address
-      };
-    };
-
-    let result = await VaultBalances.getOrFetchBalance(
-      balanceCache,
-      caller,
-      chain,
-      address,
-      systemSettings.infuraApiKey,
-      systemSettings.tronGridApiKey,
-      systemSettings.bscScanApiKey,
-    );
-    toBalanceView(result)
+    {
+      chain;
+      usdtBalance = 0;
+      usdcBalance = 0;
+      lastChecked = 0;
+      error = ?"Vault deposit addresses are disabled until production-grade chain derivation is enabled.";
+    }
   };
 
   // ─── Public query — get cached balance ───────────────────────────────────

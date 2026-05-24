@@ -1,6 +1,6 @@
 /// RateLimiter.test.mo — Sliding window rate limiter tests
 ///
-/// Time.now() cannot be manipulated, so we test:
+/// Types.now() cannot be manipulated, so we test:
 ///   1. First call is always allowed.
 ///   2. Calls within a very large window are counted until limit hit.
 ///   3. Zero-duration window means every call resets → all calls allowed.

@@ -16,6 +16,7 @@ export default function ExplorerApiKeysForm() {
   const { actor, isFetching } = useBackend();
   const { t } = useLocale();
   const queryClient = useQueryClient();
+  const keyStorageEnabled = false;
 
   const [draft, setDraft] = useState<Record<KeyField, string>>({
     tronGrid: "",
@@ -23,7 +24,11 @@ export default function ExplorerApiKeysForm() {
     infura: "",
   });
 
-  const { data: status, isLoading, isError: statusQueryFailed } = useQuery({
+  const {
+    data: status,
+    isLoading,
+    isError: statusQueryFailed,
+  } = useQuery({
     queryKey: ["explorerApiKeyStatus"],
     queryFn: async () => {
       if (!actor) throw new Error("No actor");
@@ -128,6 +133,7 @@ export default function ExplorerApiKeysForm() {
                   type="password"
                   autoComplete="off"
                   placeholder={t("admin.explorerKeys.placeholder")}
+                  disabled={!keyStorageEnabled}
                   value={draft[field.id]}
                   onChange={(e) =>
                     setDraft((prev) => ({
@@ -140,7 +146,9 @@ export default function ExplorerApiKeysForm() {
                   type="button"
                   variant="secondary"
                   disabled={
-                    saveMutation.isPending || !draft[field.id].trim()
+                    !keyStorageEnabled ||
+                    saveMutation.isPending ||
+                    !draft[field.id].trim()
                   }
                   onClick={() => saveMutation.mutate(field.id)}
                   data-ocid={`${field.ocid}-save`}

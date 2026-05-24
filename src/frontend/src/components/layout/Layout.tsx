@@ -1,9 +1,9 @@
 import { Link, Outlet, useLocation } from "@tanstack/react-router";
 import {
   ArrowLeftRight,
-  Heart,
   Coins,
   CreditCard,
+  Heart,
   LayoutDashboard,
   ListPlus,
   LogIn,
@@ -174,7 +174,9 @@ function BalanceChip() {
         type="button"
         onClick={refresh}
         disabled={loading}
-        aria-label={t("header.balance.refreshing")}
+        aria-label={
+          loading ? t("header.balance.refreshing") : t("header.balance.refresh")
+        }
         className="ml-0.5 opacity-60 hover:opacity-100 disabled:opacity-30 transition-smooth focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-full"
         data-ocid="header-balance-refresh"
       >
@@ -221,6 +223,7 @@ export default function Layout() {
 
   const isActive = (path: string) =>
     location.pathname === path || location.pathname.startsWith(`${path}/`);
+  const isAdminRoute = isActive("/admin");
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -444,7 +447,9 @@ export default function Layout() {
         {/* Page content — pb-16 on mobile to clear bottom nav */}
         <main
           id="main-content"
-          className="flex-1 overflow-y-auto bg-background pb-16 md:pb-0"
+          className={`flex-1 overflow-y-auto bg-background md:pb-0 ${
+            isAdminRoute ? "pb-0" : "pb-16"
+          }`}
           data-ocid="main-content"
           tabIndex={-1}
         >
@@ -492,118 +497,122 @@ export default function Layout() {
       </div>
 
       {/* ── Bottom nav (mobile) — 4 items: Browse, Trades, Sell, Profile ─── */}
-      <nav
-        className="md:hidden fixed bottom-0 left-0 right-0 bg-card border-t border-border z-50 flex items-stretch justify-around"
-        style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
-        data-ocid="bottom-nav"
-        aria-label="Mobile navigation"
-      >
-        {/* Browse */}
-        <Link
-          to="/listings"
-          data-ocid="bottom-nav-browse"
-          aria-current={isActive("/listings") ? "page" : undefined}
-          className={`flex flex-col items-center justify-center gap-0.5 flex-1 py-2 min-h-[52px] text-[10px] font-medium transition-smooth focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
-            isActive("/listings") && !isActive("/listings/create")
-              ? "text-accent"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
+      {!isAdminRoute && (
+        <nav
+          className="md:hidden fixed bottom-0 left-0 right-0 bg-card border-t border-border z-50 flex items-stretch justify-around"
+          style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
+          data-ocid="bottom-nav"
+          aria-label="Mobile navigation"
         >
-          <PackageSearch className="h-5 w-5" aria-hidden="true" />
-          <span>{t("nav.browse")}</span>
-        </Link>
-
-        {/* Trades */}
-        <Link
-          to="/trades"
-          data-ocid="bottom-nav-trades"
-          aria-current={isActive("/trades") ? "page" : undefined}
-          className={`flex flex-col items-center justify-center gap-0.5 flex-1 py-2 min-h-[52px] text-[10px] font-medium transition-smooth focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
-            isActive("/trades")
-              ? "text-accent"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          <div className="relative">
-            <ArrowLeftRight className="h-5 w-5" aria-hidden="true" />
-            {tradesRequiringAction > 0 && (
-              <span
-                className="absolute -top-1.5 -right-2 inline-flex items-center justify-center min-w-[1rem] h-4 px-1 text-[10px] font-bold leading-none text-white bg-destructive rounded-full"
-                aria-label={`${tradesRequiringAction} ${t("nav.badge_trades_action")}`}
-              >
-                {tradesRequiringAction > 9 ? "9+" : tradesRequiringAction}
-              </span>
-            )}
-          </div>
-          <span>{t("nav.myTrades")}</span>
-        </Link>
-
-        {/* Sell — prominent center button */}
-        <Link
-          to="/listings/create"
-          data-ocid="bottom-nav-sell"
-          aria-current={isActive("/listings/create") ? "page" : undefined}
-          className="flex flex-col items-center justify-center gap-0.5 flex-1 py-2 min-h-[52px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-        >
-          <div
-            className={`flex items-center justify-center w-9 h-9 rounded-full transition-smooth ${
-              isActive("/listings/create")
-                ? "bg-accent text-accent-foreground"
-                : "bg-accent/15 text-accent hover:bg-accent/25"
-            }`}
-          >
-            <ListPlus className="h-5 w-5" aria-hidden="true" />
-          </div>
-          <span
-            className={`text-[10px] font-medium ${
-              isActive("/listings/create")
-                ? "text-accent"
-                : "text-muted-foreground"
-            }`}
-          >
-            {t("nav.sell")}
-          </span>
-        </Link>
-
-        {/* Profile (or Login) */}
-        {isAuthenticated && principal ? (
+          {/* Browse */}
           <Link
-            to="/profile/$id"
-            params={{ id: principal.toText() }}
-            data-ocid="bottom-nav-profile"
-            aria-current={isActive("/profile") ? "page" : undefined}
+            to="/listings"
+            data-ocid="bottom-nav-browse"
+            aria-current={isActive("/listings") ? "page" : undefined}
             className={`flex flex-col items-center justify-center gap-0.5 flex-1 py-2 min-h-[52px] text-[10px] font-medium transition-smooth focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
-              isActive("/profile")
+              isActive("/listings") && !isActive("/listings/create")
+                ? "text-accent"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <PackageSearch className="h-5 w-5" aria-hidden="true" />
+            <span>{t("nav.browse")}</span>
+          </Link>
+
+          {/* Trades */}
+          <Link
+            to="/trades"
+            data-ocid="bottom-nav-trades"
+            aria-current={isActive("/trades") ? "page" : undefined}
+            className={`flex flex-col items-center justify-center gap-0.5 flex-1 py-2 min-h-[52px] text-[10px] font-medium transition-smooth focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+              isActive("/trades")
                 ? "text-accent"
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
             <div className="relative">
-              <User className="h-5 w-5" aria-hidden="true" />
-              {unreadMessages > 0 && (
+              <ArrowLeftRight className="h-5 w-5" aria-hidden="true" />
+              {tradesRequiringAction > 0 && (
                 <span
                   className="absolute -top-1.5 -right-2 inline-flex items-center justify-center min-w-[1rem] h-4 px-1 text-[10px] font-bold leading-none text-white bg-destructive rounded-full"
-                  aria-label={`${unreadMessages} ${t("nav.badge_unread_messages")}`}
+                  aria-label={`${tradesRequiringAction} ${t("nav.badge_trades_action")}`}
                 >
-                  {unreadMessages > 9 ? "9+" : unreadMessages}
+                  {tradesRequiringAction > 9 ? "9+" : tradesRequiringAction}
                 </span>
               )}
             </div>
-            <span>{t("nav.profile")}</span>
+            <span>{t("nav.myTrades")}</span>
           </Link>
-        ) : (
-          <button
-            type="button"
-            onClick={login}
-            disabled={isInitializing || isLoggingIn}
-            data-ocid="bottom-nav-login"
-            className="flex flex-col items-center justify-center gap-0.5 flex-1 py-2 min-h-[52px] text-[10px] font-medium text-muted-foreground hover:text-foreground transition-smooth focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+
+          {/* Sell — prominent center button */}
+          <Link
+            to="/listings/create"
+            data-ocid="bottom-nav-sell"
+            aria-current={isActive("/listings/create") ? "page" : undefined}
+            className="flex flex-col items-center justify-center gap-0.5 flex-1 py-2 min-h-[52px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
-            <LogIn className="h-5 w-5" aria-hidden="true" />
-            <span>{isLoggingIn ? t("nav.connecting") : t("nav.connect")}</span>
-          </button>
-        )}
-      </nav>
+            <div
+              className={`flex items-center justify-center w-9 h-9 rounded-full transition-smooth ${
+                isActive("/listings/create")
+                  ? "bg-accent text-accent-foreground"
+                  : "bg-accent/15 text-accent hover:bg-accent/25"
+              }`}
+            >
+              <ListPlus className="h-5 w-5" aria-hidden="true" />
+            </div>
+            <span
+              className={`text-[10px] font-medium ${
+                isActive("/listings/create")
+                  ? "text-accent"
+                  : "text-muted-foreground"
+              }`}
+            >
+              {t("nav.sell")}
+            </span>
+          </Link>
+
+          {/* Profile (or Login) */}
+          {isAuthenticated && principal ? (
+            <Link
+              to="/profile/$id"
+              params={{ id: principal.toText() }}
+              data-ocid="bottom-nav-profile"
+              aria-current={isActive("/profile") ? "page" : undefined}
+              className={`flex flex-col items-center justify-center gap-0.5 flex-1 py-2 min-h-[52px] text-[10px] font-medium transition-smooth focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                isActive("/profile")
+                  ? "text-accent"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <div className="relative">
+                <User className="h-5 w-5" aria-hidden="true" />
+                {unreadMessages > 0 && (
+                  <span
+                    className="absolute -top-1.5 -right-2 inline-flex items-center justify-center min-w-[1rem] h-4 px-1 text-[10px] font-bold leading-none text-white bg-destructive rounded-full"
+                    aria-label={`${unreadMessages} ${t("nav.badge_unread_messages")}`}
+                  >
+                    {unreadMessages > 9 ? "9+" : unreadMessages}
+                  </span>
+                )}
+              </div>
+              <span>{t("nav.profile")}</span>
+            </Link>
+          ) : (
+            <button
+              type="button"
+              onClick={login}
+              disabled={isInitializing || isLoggingIn}
+              data-ocid="bottom-nav-login"
+              className="flex flex-col items-center justify-center gap-0.5 flex-1 py-2 min-h-[52px] text-[10px] font-medium text-muted-foreground hover:text-foreground transition-smooth focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+            >
+              <LogIn className="h-5 w-5" aria-hidden="true" />
+              <span>
+                {isLoggingIn ? t("nav.connecting") : t("nav.connect")}
+              </span>
+            </button>
+          )}
+        </nav>
+      )}
     </div>
   );
 }

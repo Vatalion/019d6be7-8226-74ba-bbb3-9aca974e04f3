@@ -2,6 +2,10 @@
 
 import { suite; test; expect } "mo:test";
 import Reputation "../src/backend/lib/Reputation";
+import Types "../src/backend/types";
+import Principal "mo:core/Principal";
+import Map "mo:core/Map";
+import Nat "mo:core/Nat";
 
 suite("Reputation — maxTradeAmount tier gates", func() {
   test("score 0 → Tier 1: $1,000 (100_000 cents)", func() {
@@ -95,5 +99,235 @@ suite("Reputation — calculateTrustLevel", func() {
 
   test("100 completed trades → #gold", func() {
     expect.text(debug_show(Reputation.calculateTrustLevel(100))).equal(debug_show(#gold));
+  });
+});
+
+suite("Reputation — liability depth (E6.S6)", func() {
+  func sampleUser(id : Principal) : Types.User {
+    {
+      id;
+      var username = "u";
+      var bio = "";
+      var avatarUrl = "";
+      var role = #user;
+      createdAt = 0;
+      var reputationScore = 0;
+      var buyerScore = 0;
+      var sellerScore = 0;
+      var trustLevel = #new_;
+      var kycTier = #none;
+      var isBanned = false;
+      var suspendedUntil = null;
+      var liabilityBalance = 0;
+      var liabilityHistory = [];
+      var paymentMethods = [];
+      var linkedWallets = [];
+      var accountClosedAt = null;
+    }
+  };
+
+  test("createLiability assigns unique ID and records fields", func() {
+    let records = Map.empty<Nat, Types.LiabilityRecord>();
+    let nextId = { var value = 1 : Nat };
+    let seller = sampleUser(Principal.fromText("aaaaa-aa"));
+    let mod = Principal.fromText("rdmx6-jaaaa-aaaaa-aaadq-cai");
+    let id = Reputation.createLiability(
+      records, nextId, seller, 50_000, #USDT_TRC20, #dispute_lost, mod, ?42,
+    );
+    expect.nat(id).equal(1);
+    expect.int(seller.liabilityBalance).equal(-50_000);
+    switch (records.get(1)) {
+      case null { expect.bool(false).isTrue() };
+      case (?rec) {
+        expect.nat(rec.originalAmount).equal(50_000);
+        expect.nat(rec.remainingBalance).equal(50_000);
+        expect.text(debug_show(rec.status)).equal(debug_show(#open));
+        switch (rec.tradeId) {
+          case (?tid) { expect.nat(tid).equal(42) };
+          case null { expect.bool(false).isTrue() };
+        };
+      };
+    };
+  });
+
+  test("applyStakeSeizure sets partial status when residual > 0", func() {
+    let records = Map.empty<Nat, Types.LiabilityRecord>();
+    let nextId = { var value = 1 : Nat };
+    let seller = sampleUser(Principal.fromText("aaaaa-aa"));
+    let id = Reputation.createLiability(
+      records, nextId, seller, 10_000, #USDT_TRC20, #seller_fault,
+      Principal.fromText("aaaaa-aa"), ?1,
+    );
+    switch (Reputation.applyStakeSeizure(records, seller, id, 3_000, seller.id)) {
+      case (#ok(())) {};
+      case (#err(_)) { expect.bool(false).isTrue() };
+    };
+    switch (records.get(id)) {
+      case null { expect.bool(false).isTrue() };
+      case (?rec) {
+        expect.nat(rec.remainingBalance).equal(7_000);
+        expect.text(debug_show(rec.status)).equal(debug_show(#partial));
+      };
+    };
+    expect.int(seller.liabilityBalance).equal(-7_000);
+  });
+
+  test("partialClearLiability writes audit and clears block when below threshold", func() {
+    let records = Map.empty<Nat, Types.LiabilityRecord>();
+    let nextId = { var value = 1 : Nat };
+    let seller = sampleUser(Principal.fromText("aaaaa-aa"));
+    let admin = Principal.fromText("rdmx6-jaaaa-aaaaa-aaadq-cai");
+    let id = Reputation.createLiability(
+      records, nextId, seller, 15_000, #USDT_TRC20, #dispute_lost, admin, ?2,
+    );
+    switch (Reputation.partialClearLiability(records, seller, id, 10_000, admin, "goodwill")) {
+      case (#ok(())) {};
+      case (#err(_)) { expect.bool(false).isTrue() };
+    };
+    expect.bool(Reputation.isTradeBlocked(seller)).isFalse();
+    switch (records.get(id)) {
+      case null { expect.bool(false).isTrue() };
+      case (?rec) {
+        expect.nat(rec.remainingBalance).equal(5_000);
+        expect.nat(rec.auditTrail.size()).equal(2);
+      };
+    };
+  });
+
+  test("tradeBlockedErrorUa cites liability ID", func() {
+    let records = Map.empty<Nat, Types.LiabilityRecord>();
+    let nextId = { var value = 1 : Nat };
+    let seller = sampleUser(Principal.fromText("aaaaa-aa"));
+    ignore Reputation.createLiability(
+      records, nextId, seller, 20_000, #USDT_TRC20, #dispute_lost,
+      Principal.fromText("aaaaa-aa"), null,
+    );
+    let msg = Reputation.tradeBlockedErrorUa(seller, records);
+    expect.bool(msg.contains(#text "№1")).isTrue();
+    expect.bool(msg.contains(#text "заблоковано")).isTrue();
+  });
+
+  test("sortedLiabilitiesForAdmin orders by severity then age", func() {
+    let records = Map.empty<Nat, Types.LiabilityRecord>();
+    let nextId = { var value = 1 : Nat };
+    let u1 = sampleUser(Principal.fromText("aaaaa-aa"));
+    let u2 = sampleUser(Principal.fromText("rdmx6-jaaaa-aaaaa-aaadq-cai"));
+    ignore Reputation.createLiability(
+      records, nextId, u1, 5_000, #USDT_TRC20, #dispute_lost, u1.id, null,
+    );
+    ignore Reputation.createLiability(
+      records, nextId, u2, 20_000, #USDT_TRC20, #dispute_lost, u2.id, null,
+    );
+    let sorted = Reputation.sortedLiabilitiesForAdmin(records);
+    expect.nat(sorted.size()).equal(2);
+    expect.nat(sorted[0].remainingBalance).equal(20_000);
+    expect.nat(sorted[1].remainingBalance).equal(5_000);
+  });
+
+  test("clearLiability resets all open records", func() {
+    let records = Map.empty<Nat, Types.LiabilityRecord>();
+    let nextId = { var value = 1 : Nat };
+    let seller = sampleUser(Principal.fromText("aaaaa-aa"));
+    let admin = Principal.fromText("rdmx6-jaaaa-aaaaa-aaadq-cai");
+    ignore Reputation.createLiability(
+      records, nextId, seller, 5_000, #USDT_TRC20, #cancellation_fee, admin, null,
+    );
+    Reputation.clearLiability(records, seller, admin, "admin review");
+    expect.int(seller.liabilityBalance).equal(0);
+    expect.nat(seller.liabilityHistory.size()).equal(2);
+  });
+});
+
+suite("Reputation — liability and dual scores", func() {
+  test("isTradeBlocked when liability exceeds threshold", func() {
+    let user : Types.User = {
+      id = Principal.fromText("un4fu-tqaaa-aaaab-qadjq-cai");
+      var username = "u";
+      var bio = "";
+      var avatarUrl = "";
+      var role = #user;
+      createdAt = 0;
+      var reputationScore = 0;
+      var buyerScore = 0;
+      var sellerScore = 0;
+      var trustLevel = #new_;
+    var kycTier = #none;
+      var isBanned = false;
+      var suspendedUntil = null;
+      var liabilityBalance = -20_000;
+      var liabilityHistory = [];
+      var paymentMethods = [];
+    var linkedWallets = [];
+      var accountClosedAt = null;
+    };
+    expect.bool(Reputation.isTradeBlocked(user)).isTrue();
+  });
+
+  test("ensureDualScores copies legacy reputationScore", func() {
+    let user : Types.User = {
+      id = Principal.fromText("rdmx6-jaaaa-aaaaa-aaadq-cai");
+      var username = "u";
+      var bio = "";
+      var avatarUrl = "";
+      var role = #user;
+      createdAt = 0;
+      var reputationScore = 42;
+      var buyerScore = 0;
+      var sellerScore = 0;
+      var trustLevel = #bronze;
+    var kycTier = #none;
+      var isBanned = false;
+      var suspendedUntil = null;
+      var liabilityBalance = 0;
+      var liabilityHistory = [];
+      var paymentMethods = [];
+    var linkedWallets = [];
+      var accountClosedAt = null;
+    };
+    Reputation.ensureDualScores(user);
+    expect.int(user.buyerScore).equal(42);
+    expect.int(user.sellerScore).equal(42);
+  });
+
+  test("clearLiability resets balance via records", func() {
+    let records = Map.empty<Nat, Types.LiabilityRecord>();
+    let nextId = { var value = 1 : Nat };
+    let user : Types.User = {
+      id = Principal.fromText("aaaaa-aa");
+      var username = "u";
+      var bio = "";
+      var avatarUrl = "";
+      var role = #user;
+      createdAt = 0;
+      var reputationScore = 0;
+      var buyerScore = 0;
+      var sellerScore = 0;
+      var trustLevel = #new_;
+    var kycTier = #none;
+      var isBanned = false;
+      var suspendedUntil = null;
+      var liabilityBalance = -5_000;
+      var liabilityHistory = [];
+      var paymentMethods = [];
+    var linkedWallets = [];
+      var accountClosedAt = null;
+    };
+    Reputation.clearLiability(
+      records, user, Principal.fromText("rdmx6-jaaaa-aaaaa-aaadq-cai"), "admin review",
+    );
+    expect.int(user.liabilityBalance).equal(0);
+    expect.nat(user.liabilityHistory.size()).equal(1);
+  });
+});
+
+suite("Reputation — KYC verified tier doubles limits", func() {
+  test("verified tier doubles max trade amount", func() {
+    expect.nat(Reputation.maxTradeAmountForTier(0, #verified)).equal(200_000);
+    expect.nat(Reputation.maxTradeAmountForTier(50, #verified)).equal(1_000_000);
+  });
+
+  test("canTradeAmountForUser respects verified boost", func() {
+    expect.bool(Reputation.canTradeAmountForUser(0, #verified, 200_000)).isTrue();
+    expect.bool(Reputation.canTradeAmountForUser(0, #verified, 200_001)).isFalse();
   });
 });

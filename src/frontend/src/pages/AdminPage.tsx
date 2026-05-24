@@ -6,19 +6,24 @@ import {
   LayoutDashboard,
   ListOrdered,
   LogIn,
+  Scale,
   Settings,
   ShieldCheck,
   Users,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { UserRole } from "../backend.d";
 import AuditLogTable from "../components/admin/AuditLogTable";
 import DisputeQueueTable from "../components/admin/DisputeQueueTable";
+import LiabilityQueueTable from "../components/admin/LiabilityQueueTable";
 import MetricsDashboard from "../components/admin/MetricsDashboard";
 import Phase2MetricsPanel from "../components/admin/Phase2MetricsPanel";
 import SystemSettingsForm from "../components/admin/SystemSettingsForm";
+import TrustlessEscrowPanel from "../components/admin/TrustlessEscrowPanel";
 import UserManagementTable from "../components/admin/UserManagementTable";
 import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
 import { useAuth } from "../hooks/useAuth";
 import { useBackend } from "../hooks/useBackend";
 import { useLocale } from "../hooks/useLocale";
@@ -28,6 +33,7 @@ type AdminTab =
   | "overview"
   | "users"
   | "disputes"
+  | "liabilities"
   | "listings"
   | "audit"
   | "settings";
@@ -36,6 +42,7 @@ const TAB_LABEL_KEYS: Record<AdminTab, TranslationKey> = {
   overview: "admin.tab.overview",
   users: "admin.tab.users",
   disputes: "admin.tab.disputes",
+  liabilities: "admin.tab.liabilities",
   listings: "admin.tab.listings",
   audit: "admin.tab.audit",
   settings: "admin.tab.settings",
@@ -130,6 +137,10 @@ export default function AdminPage() {
     {
       id: "disputes",
       icon: <AlertTriangle className="h-4 w-4" aria-hidden="true" />,
+    },
+    {
+      id: "liabilities",
+      icon: <Scale className="h-4 w-4" aria-hidden="true" />,
     },
     {
       id: "listings",
@@ -231,13 +242,18 @@ function TabContent({ tab, userRole }: { tab: AdminTab; userRole: UserRole }) {
       return <UserManagementTable />;
     case "disputes":
       return <DisputeQueueTable />;
+    case "liabilities":
+      return <LiabilityQueueTable />;
     case "listings":
       return <ListingsTab />;
     case "audit":
       return <AuditLogTable />;
     case "settings":
       return userRole === UserRole.admin ? (
-        <SystemSettingsForm />
+        <div className="space-y-6">
+          <TrustlessEscrowPanel />
+          <SystemSettingsForm />
+        </div>
       ) : (
         <div className="rounded-md border border-border bg-card p-6 text-center text-muted-foreground">
           {t("admin.settings.adminOnly")}
@@ -252,6 +268,8 @@ function ListingsTab() {
   const { actor, isFetching } = useBackend();
   const { t } = useLocale();
   const queryClient = useQueryClient();
+  const [promoteId, setPromoteId] = useState("");
+
   const { data: listings = [], isLoading } = useQuery({
     queryKey: ["adminListings"],
     queryFn: async () => {
@@ -271,11 +289,69 @@ function ListingsTab() {
     },
   });
 
+  const promoteMutation = useMutation({
+    mutationFn: async (listingId: bigint) => {
+      if (!actor) throw new Error("Not ready");
+      const res = await actor.adminPromoteListing(listingId);
+      if (res.__kind__ === "err") {
+        throw new Error(String(res.err));
+      }
+    },
+    onSuccess: () => {
+      setPromoteId("");
+      toast.success(t("admin.listings.promoteSuccess"));
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
+  });
+
   return (
     <div>
       <h2 className="mb-4 text-lg font-semibold text-foreground">
         {t("admin.listings.title")}
       </h2>
+
+      <div
+        className="mb-6 rounded-md border border-border bg-muted/20 p-4"
+        data-ocid="admin-promote-listing"
+      >
+        <p className="text-sm font-semibold text-foreground">
+          {t("admin.listings.promoteTitle")}
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {t("admin.listings.promoteHint")}
+        </p>
+        <form
+          className="mt-3 flex flex-wrap items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const id = BigInt(promoteId.trim());
+            promoteMutation.mutate(id);
+          }}
+        >
+          <Input
+            type="text"
+            inputMode="numeric"
+            value={promoteId}
+            onChange={(e) => setPromoteId(e.target.value)}
+            placeholder={t("admin.listings.promotePlaceholder")}
+            className="max-w-xs"
+            data-ocid="admin-promote-listing-id"
+          />
+          <Button
+            type="submit"
+            size="sm"
+            disabled={!promoteId.trim() || promoteMutation.isPending}
+            data-ocid="admin-promote-listing-submit"
+          >
+            {promoteMutation.isPending
+              ? t("admin.listings.promoting")
+              : t("admin.listings.promote")}
+          </Button>
+        </form>
+      </div>
+
       {isLoading ? (
         <div className="space-y-2">
           {Array.from({ length: 5 }).map((_, i) => (

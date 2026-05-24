@@ -3,6 +3,7 @@ import { ItemCondition, ShippingCarrier, TrustLevel } from "@/backend";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { formatTokenAmountLabel } from "@/lib/tradeFeeQuote";
 import { useNavigate } from "@tanstack/react-router";
 import { MapPin, Package, Star, Truck, Zap } from "lucide-react";
 import type { ReactNode } from "react";
@@ -11,9 +12,7 @@ import { detectLocale, t } from "../../i18n";
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 function formatPrice(amount: bigint, token: string): string {
-  const num = Number(amount) / 1e8;
-  const formatted = num % 1 === 0 ? num.toFixed(0) : num.toFixed(2);
-  return `${formatted} ${token}`;
+  return formatTokenAmountLabel(amount, token);
 }
 
 function conditionLabel(c: ItemCondition): string {
@@ -120,18 +119,20 @@ interface ListingCardProps {
 export function ListingCard({ listing }: ListingCardProps) {
   const navigate = useNavigate();
   const photo = listing.photos[0] ?? "/assets/images/placeholder.svg";
+  const openListing = () =>
+    navigate({ to: "/listings/$id", params: { id: listing.id.toString() } });
 
   const uniqueCarriers = Array.from(
     new Set(listing.shippingMethods.map((m) => m.carrier)),
   );
 
   return (
-    <Card
+    <button
+      type="button"
       data-ocid="listing-card"
-      className="card-elevated group cursor-pointer overflow-hidden flex flex-col hover:border-accent/40 transition-smooth"
-      onClick={() =>
-        navigate({ to: "/listings/$id", params: { id: listing.id.toString() } })
-      }
+      className="card-elevated group cursor-pointer overflow-hidden flex flex-col hover:border-accent/40 transition-smooth text-left"
+      onClick={openListing}
+      aria-label={listing.title}
     >
       {/* Photo */}
       <div className="relative aspect-[4/3] overflow-hidden bg-muted">
@@ -212,13 +213,13 @@ export function ListingCard({ listing }: ListingCardProps) {
             {listing.sellerRating > 0n && (
               <div className="flex items-center gap-0.5 text-[10px] sm:text-xs text-muted-foreground">
                 <Star className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-accent fill-accent" />
-                <span>{Number(listing.sellerRating).toFixed(1)}</span>
+                <span>{(Number(listing.sellerRating) / 10).toFixed(1)}</span>
               </div>
             )}
           </div>
         </div>
       </div>
-    </Card>
+    </button>
   );
 }
 

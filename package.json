@@ -2,18 +2,21 @@
   "name": "@caffeine/template-app",
   "type": "module",
   "engines": {
-    "node": ">=16.0.0",
-    "pnpm": ">=7.0.0",
+    "node": ">=22.0.0",
+    "pnpm": ">=10.0.0",
     "npm": "please use pnpm"
   },
   "scripts": {
-    "build": "pnpm -r --if-present run build",
+    "build": "node scripts/patch-backend-bindings.mjs && pnpm -r --if-present run build",
     "typecheck": "pnpm -r --if-present run typecheck",
+    "test": "pnpm --dir src/frontend test && mops test && node --test test/*.test.mjs",
     "check": "pnpm -r --if-present run check",
+    "verify": "pnpm typecheck && pnpm check && pnpm test && mops check && mops build",
     "fix": "pnpm -r --if-present run fix",
-    "bindgen": "caffeine-bindgen --did-file ./src/backend/dist/backend.did --out-dir ./src/frontend/src --actor-interface-file --force"
+    "bindgen": "icp-bindgen --did-file ./src/backend/dist/backend.did --out-dir ./src/frontend/src --actor-interface-file --force && node scripts/patch-backend-bindings.mjs"
   },
   "devDependencies": {
+    "@icp-sdk/bindgen": "^0.4.0",
     "sharp": "^0.34.4"
   },
   "dependencies": {

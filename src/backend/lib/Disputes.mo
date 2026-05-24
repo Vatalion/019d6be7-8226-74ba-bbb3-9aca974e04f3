@@ -12,13 +12,153 @@ import Types "../types";
 module {
 
   // 7 days in nanoseconds
-  let APPEAL_WINDOW_NS : Int = 604_800_000_000_000;
+  let APPEAL_WINDOW_NS : Nat = 604_800_000_000_000;
+
+  /// E6.S9 L1 SLA — physical 24h (D-031).
+  let L1_SLA_PHYSICAL_NS : Nat = 86_400_000_000_000;
+  /// E6.S9 L1 SLA — digital 6h (D-031).
+  let L1_SLA_DIGITAL_NS : Nat = 21_600_000_000_000;
+  /// E6.S9 L2 moderator triage target max 12h (D-032).
+  let L2_TRIAGE_MAX_NS : Nat = 43_200_000_000_000;
+  /// E6.S9 L2 moderator decision target max 72h (D-032).
+  let L2_DECISION_MAX_NS : Nat = 259_200_000_000_000;
+
+  public func emptyEvidencePack() : Types.DisputeEvidencePack {
+    {
+      ttnScreenshotUrl  = null;
+      packagePhotoUrls  = [];
+      chatThreadLink    = null;
+      fileHash          = null;
+      downloadTimestamp = 0;
+    }
+  };
+
+  /// True when trade status blocks payout / auto-complete (E6.S9 freeze scope).
+  public func isDisputeFrozenTradeStatus(status : Types.TradeStatus) : Bool {
+    switch (status) {
+      case (#disputed or #dispute_l1 or #dispute_l2) true;
+      case (_) false;
+    }
+  };
+
+  /// Manual trades update immediately; ICRC trades stay frozen until on-chain settlement.
+  func applyDisputeTradeOutcome(
+    trade : Types.Trade,
+    outcome : Types.ResolutionOutcome,
+  ) {
+    switch (trade.escrowAccount) {
+      case null {
+        switch (outcome) {
+          case (#seller_wins) { trade.status := #complete };
+          case (#buyer_wins)  { trade.status := #refunded };
+          case (#split)       { trade.status := #complete };
+        };
+      };
+      case (?_) {};
+    };
+  };
+
+  func tradeKindFromTrade(trade : Types.Trade) : Types.DisputeTradeKind {
+    switch (trade.digitalDelivery) {
+      case (?_) #digital;
+      case null #physical;
+    }
+  };
+
+  func l1SlaNs(kind : Types.DisputeTradeKind) : Nat {
+    switch (kind) {
+      case (#physical) L1_SLA_PHYSICAL_NS;
+      case (#digital) L1_SLA_DIGITAL_NS;
+    }
+  };
+
+  func isPostFulfillmentDisputeEligible(trade : Types.Trade) : Bool {
+    switch (tradeKindFromTrade(trade)) {
+      case (#digital) trade.status == #digital_delivered;
+      case (#physical) {
+        switch (trade.status) {
+          case (#shipped or #awaiting_receipt) true;
+          case (_) false;
+        };
+      };
+    }
+  };
+
+  /// Returns error message when evidence pack fails checklist; null when valid.
+  public func validateEvidencePack(
+    kind         : Types.DisputeTradeKind,
+    pack         : Types.DisputeEvidencePack,
+    attachments  : [Types.MediaAttachment],
+  ) : ?Text {
+    switch (kind) {
+      case (#physical) {
+        switch (pack.ttnScreenshotUrl) {
+          case null return ?"TTN screenshot is required for physical disputes";
+          case (?url) if (url.size() == 0) return ?"TTN screenshot is required for physical disputes";
+          case (_) {};
+        };
+        let photoCount = pack.packagePhotoUrls.size() + attachments.filter(
+          func(a : Types.MediaAttachment) : Bool {
+            Text.startsWith(a.mimeType, #text "image/")
+          },
+        ).size();
+        if (photoCount < 2) {
+          return ?"At least 2 package photos are required for physical disputes";
+        };
+        switch (pack.chatThreadLink) {
+          case null return ?"Chat export link is required for physical disputes";
+          case (?link) if (link.size() == 0) return ?"Chat export link is required for physical disputes";
+          case (_) {};
+        };
+        null
+      };
+      case (#digital) {
+        switch (pack.fileHash) {
+          case null return ?"File hash is required for digital disputes";
+          case (?hash) if (hash.size() == 0) return ?"File hash is required for digital disputes";
+          case (_) {};
+        };
+        if (pack.downloadTimestamp == 0) return ?"Download timestamp is required for digital disputes";
+        null
+      };
+    }
+  };
+
+  public func computeSlaFlags(dispute : Types.Dispute, now : Types.Timestamp) : Types.DisputeSlaFlags {
+    let l1Overdue = dispute.status == #opened and now > dispute.l1SlaDeadline;
+    let l2TriageOverdue = switch (dispute.l2TriageDeadline) {
+      case null false;
+      case (?d) dispute.status == #l2_queued and now > d;
+    };
+    let l2DecisionOverdue = switch (dispute.l2DecisionDeadline) {
+      case null false;
+      case (?d) dispute.status == #l2_queued and now > d;
+    };
+    { l1SlaOverdue = l1Overdue; l2TriageOverdue = l2TriageOverdue; l2DecisionOverdue = l2DecisionOverdue }
+  };
+
+  func freezeTradeForDispute(trade : Types.Trade, level : Types.DisputeLevel) : () {
+    trade.payoutWalletHeld := true;
+    trade.status := switch (level) {
+      case (#l1) #dispute_l1;
+      case (#l2) #dispute_l2;
+    };
+  };
+
+  func activateL2(dispute : Types.Dispute, trade : Types.Trade, now : Types.Timestamp) : () {
+    dispute.level := #l2;
+    dispute.status := #l2_queued;
+    dispute.l2QueuedAt := ?now;
+    dispute.l2TriageDeadline := ?(now + L2_TRIAGE_MAX_NS);
+    dispute.l2DecisionDeadline := ?(now + L2_DECISION_MAX_NS);
+    freezeTradeForDispute(trade, #l2);
+  };
 
   /// Jury voting deadline in hours (public constant for API layer).
   public let JURY_VOTE_DEADLINE_HOURS : Nat = 72;
 
   // Jury voting deadline: 72 hours in nanoseconds (72 * 3_600_000_000_000)
-  let JURY_DEADLINE_NS : Int = 259_200_000_000_000;
+  let JURY_DEADLINE_NS : Nat = 259_200_000_000_000;
 
   // Minimum stake for juror registration (in USDT, stored as Float)
   let MIN_JUROR_STAKE : Float = 10.0;
@@ -50,20 +190,81 @@ module {
     Principal.equal(trade.buyer, caller) or Principal.equal(trade.seller, caller)
   };
 
-  /// Returns true if caller is moderator or admin.
-  public func isMod(user : Types.User) : Bool {
+  /// Mirrors Auth.canActAsModerator — local copy avoids Auth→Escrow→Disputes import cycle.
+  func isActiveModerator(user : Types.User) : Bool {
+    if (user.isBanned) return false;
+    switch (user.suspendedUntil) {
+      case (?until) {
+        if (Types.now() < until) return false;
+      };
+      case null {};
+    };
     switch (user.role) {
       case (#moderator or #admin) true;
-      case _ false;
+      case (_) false;
+    };
+  };
+
+  func canActAsModerator(
+    users : Map.Map<Types.UserId, Types.User>,
+    caller : Principal,
+  ) : Bool {
+    switch (users.get(caller)) {
+      case (?u) isActiveModerator(u);
+      case null false;
+    };
+  };
+
+  func isAssignedJuror(
+    juryMap : Map.Map<Types.DisputeId, Types.JuryAssignment>,
+    disputeId : Types.DisputeId,
+    caller : Principal,
+  ) : Bool {
+    switch (juryMap.get(disputeId)) {
+      case (?a) {
+        for (j in a.jurorIds.vals()) {
+          if (Principal.equal(j, caller)) return true;
+        };
+        false
+      };
+      case null false;
+    };
+  };
+
+  func canAccessDispute(
+    dispute : Types.Dispute,
+    trades : Map.Map<Types.TradeId, Types.Trade>,
+    juryMap : Map.Map<Types.DisputeId, Types.JuryAssignment>,
+    users : Map.Map<Types.UserId, Types.User>,
+    caller : Principal,
+  ) : Bool {
+    if (Principal.equal(dispute.initiator, caller)) return true;
+    if (canActAsModerator(users, caller)) return true;
+    if (isAssignedJuror(juryMap, dispute.id, caller)) return true;
+    switch (trades.get(dispute.trade)) {
+      case (?t) isParticipant(t, caller);
+      case null false;
+    };
+  };
+
+  func canAccessDisputeJurors(
+    dispute : Types.Dispute,
+    trades : Map.Map<Types.TradeId, Types.Trade>,
+    users : Map.Map<Types.UserId, Types.User>,
+    caller : Principal,
+  ) : Bool {
+    if (canActAsModerator(users, caller)) return true;
+    switch (trades.get(dispute.trade)) {
+      case (?t) isParticipant(t, caller);
+      case null false;
     };
   };
 
   // ─── Open dispute ─────────────────────────────────────────────────────────
 
-  /// Buyer or seller opens a dispute on a trade.
-  /// Trade must be #funded or #buyer_confirmed.
-  /// Only one open dispute per trade is allowed.
-  /// Sets trade.status = #disputed.
+  /// Buyer or seller opens a dispute on a trade (E6.S9 playbook).
+  /// Post-fulfillment only: physical post-shipment or digital post-delivery.
+  /// Complete evidence activates L1 + payout freeze; incomplete evidence saves #draft only.
   public func openDispute(
     disputes     : Map.Map<Types.DisputeId, Types.Dispute>,
     trades       : Map.Map<Types.TradeId, Types.Trade>,
@@ -72,6 +273,8 @@ module {
     tradeId      : Types.TradeId,
     reason       : Types.DisputeReason,
     description  : Text,
+    evidencePack : Types.DisputeEvidencePack,
+    attachments  : [Types.MediaAttachment],
   ) : Types.Result<Types.DisputeId> {
     assertNotAnonymous(caller);
 
@@ -84,43 +287,191 @@ module {
       return #err(#unauthorized);
     };
 
-    switch (trade.status) {
-      case (#funded or #buyer_confirmed or #payment_verified) {};
-      case _ return #err(#invalid_input("trade must be funded, buyer_confirmed, or payment_verified to open a dispute"));
+    if (not isPostFulfillmentDisputeEligible(trade)) {
+      return #err(#invalid_input(
+        "dispute requires post-shipment physical or post-delivery digital trade state"
+      ));
     };
 
-    // Check no existing open dispute for this trade
-    var alreadyOpen = false;
-    for (entry in disputes.entries()) {
-      let (_, d) = entry;
-      if (d.trade == tradeId and (d.status == #opened or d.status == #under_review)) {
-        alreadyOpen := true;
-      };
-    };
-    if (alreadyOpen) {
+    if (isDisputeFrozenTradeStatus(trade.status)) {
       return #err(#dispute_already_open);
     };
 
-    let now = Time.now();
+    let kind = tradeKindFromTrade(trade);
+    let validationErr = validateEvidencePack(kind, evidencePack, attachments);
+    let now = Types.now();
+
+    // Upsert draft for same trade + initiator when evidence incomplete
+    for (entry in disputes.entries()) {
+      let (id, d) = entry;
+      if (d.trade == tradeId and Principal.equal(d.initiator, caller) and d.status == #draft) {
+        d.reason := reason;
+        d.description := description;
+        d.evidencePack := evidencePack;
+        d.evidenceAttachments := attachments;
+        d.tradeKind := kind;
+        switch (validationErr) {
+          case (?msg) return #err(#invalid_input(msg));
+          case null {};
+        };
+        d.status := #opened;
+        d.level := #l1;
+        d.l1SlaDeadline := now + l1SlaNs(kind);
+        freezeTradeForDispute(trade, #l1);
+        return #ok(id);
+      };
+    };
+
+    // Block second active dispute on trade
+    for (entry in disputes.entries()) {
+      let (_, d) = entry;
+      if (d.trade == tradeId and d.status != #draft and d.status != #resolved) {
+        return #err(#dispute_already_open);
+      };
+    };
+
+    let l1Deadline = now + l1SlaNs(kind);
     let dispute : Types.Dispute = {
       id             = nextId;
       trade          = tradeId;
       initiator      = caller;
-      reason         = reason;
+      var reason         = reason;
       var description  = description;
       var evidenceUrls = [];
-      var evidenceAttachments = [];
-      var status       = #opened;
+      var evidenceAttachments = attachments;
+      var status       = #draft;
       var resolution   = null;
       createdAt        = now;
       var resolvedAt   = null;
       var moderatorNotes = [];
+      var level                = #l1;
+      var tradeKind            = kind;
+      var evidencePack         = evidencePack;
+      var l1SlaDeadline        = l1Deadline;
+      var l2QueuedAt           = null;
+      var l2TriageDeadline     = null;
+      var l2DecisionDeadline   = null;
     };
 
-    disputes.add(nextId, dispute);
-    trade.status := #disputed;
+    switch (validationErr) {
+      case (?msg) {
+        disputes.add(nextId, dispute);
+        #err(#invalid_input(msg))
+      };
+      case null {
+        dispute.status := #opened;
+        freezeTradeForDispute(trade, #l1);
+        disputes.add(nextId, dispute);
+        #ok(nextId)
+      };
+    }
+  };
 
-    #ok(nextId)
+  /// Creates a system L1 dispute when the seller misses the physical ship-by SLA.
+  /// Escrow.checkShipByDeadlines has already frozen the trade, so this path must not
+  /// reuse openDispute's post-fulfillment status checks.
+  public func attachSystemShipBySlaDispute(
+    disputes : Map.Map<Types.DisputeId, Types.Dispute>,
+    trades   : Map.Map<Types.TradeId, Types.Trade>,
+    nextId   : Nat,
+    tradeId  : Types.TradeId,
+  ) : ?Types.DisputeId {
+    let trade = switch (trades.get(tradeId)) {
+      case (?t) t;
+      case null return null;
+    };
+
+    switch (trade.status) {
+      case (#dispute_l1 or #disputed) {};
+      case (_) return null;
+    };
+
+    for (entry in disputes.entries()) {
+      let (_, dispute) = entry;
+      if (dispute.trade == tradeId and dispute.status != #draft and dispute.status != #resolved) {
+        return null;
+      };
+    };
+
+    let now = Types.now();
+    let dispute : Types.Dispute = {
+      id = nextId;
+      trade = tradeId;
+      initiator = trade.buyer;
+      var reason = #seller_unresponsive;
+      var description = "System dispute: seller missed the ship-by SLA without a valid tracking number.";
+      var evidenceUrls = [];
+      var evidenceAttachments = [];
+      var status = #opened;
+      var resolution = null;
+      createdAt = now;
+      var resolvedAt = null;
+      var moderatorNotes = ["[SYSTEM] Ship-by SLA expired without TTN; payout frozen."];
+      var level = #l1;
+      var tradeKind = #physical;
+      var evidencePack = emptyEvidencePack();
+      var l1SlaDeadline = now + L1_SLA_PHYSICAL_NS;
+      var l2QueuedAt = null;
+      var l2TriageDeadline = null;
+      var l2DecisionDeadline = null;
+    };
+
+    freezeTradeForDispute(trade, #l1);
+    disputes.add(nextId, dispute);
+    ?nextId
+  };
+
+  /// Party escalates L1 → L2 moderator queue (E6.S9 AC 2).
+  public func escalateDisputeToL2(
+    disputes  : Map.Map<Types.DisputeId, Types.Dispute>,
+    trades    : Map.Map<Types.TradeId, Types.Trade>,
+    caller    : Principal,
+    disputeId : Types.DisputeId,
+  ) : Types.Result<()> {
+    assertNotAnonymous(caller);
+
+    let dispute = switch (disputes.get(disputeId)) {
+      case (?d) d;
+      case null return #err(#not_found);
+    };
+
+    let trade = switch (trades.get(dispute.trade)) {
+      case (?t) t;
+      case null return #err(#not_found);
+    };
+
+    if (not isParticipant(trade, caller)) {
+      return #err(#unauthorized);
+    };
+
+    switch (dispute.status) {
+      case (#opened) {};
+      case _ return #err(#invalid_input("dispute must be in L1 (#opened) to escalate"));
+    };
+
+    activateL2(dispute, trade, Types.now());
+    #ok(())
+  };
+
+  /// Auto-escalate L1 disputes past SLA to L2 (E6.S9 AC 7 / W2-8).
+  public func processL1SlaEscalations(
+    disputes : Map.Map<Types.DisputeId, Types.Dispute>,
+    trades   : Map.Map<Types.TradeId, Types.Trade>,
+  ) : Nat {
+    let now = Types.now();
+    var count = 0;
+    for ((disputeId, dispute) in disputes.entries()) {
+      if (dispute.status == #opened and now > dispute.l1SlaDeadline) {
+        switch (trades.get(dispute.trade)) {
+          case null {};
+          case (?trade) {
+            activateL2(dispute, trade, now);
+            count += 1;
+          };
+        };
+      };
+    };
+    count
   };
 
   // ─── Set under review (+ auto-assign jurors) ─────────────────────────────
@@ -143,7 +494,7 @@ module {
       case null return #err(#unauthorized);
     };
 
-    if (not isMod(moderator)) {
+    if (not isActiveModerator(moderator)) {
       return #err(#unauthorized);
     };
 
@@ -204,8 +555,8 @@ module {
     };
 
     switch (dispute.status) {
-      case (#opened or #under_review) {};
-      case _ return #err(#invalid_input("dispute must be opened or under_review to add evidence"));
+      case (#draft or #opened or #l2_queued or #under_review) {};
+      case _ return #err(#invalid_input("dispute must be draft, opened, l2_queued, or under_review to add evidence"));
     };
 
     // Append new rich attachments (evidenceUrls kept for backward compat; not modified here)
@@ -234,7 +585,7 @@ module {
       case null return #err(#unauthorized);
     };
 
-    if (not isMod(moderator)) {
+    if (not isActiveModerator(moderator)) {
       return #err(#unauthorized);
     };
 
@@ -244,8 +595,9 @@ module {
     };
 
     switch (dispute.status) {
-      case (#opened or #under_review or #escalated_to_admin) {};
-      case _ return #err(#invalid_input("dispute is not open for resolution"));
+      case (#opened or #under_review or #l2_queued or #escalated_to_admin) {};
+      case (#draft) return #err(#invalid_input("dispute is still draft — complete evidence checklist first"));
+      case (#resolved) return #ok(());
     };
 
     let trade = switch (trades.get(dispute.trade)) {
@@ -253,7 +605,11 @@ module {
       case null return #err(#not_found);
     };
 
-    let now = Time.now();
+    if (dispute.status == #opened) {
+      return #err(#invalid_input("dispute must be escalated to L2 before moderator resolution"));
+    };
+
+    let now = Types.now();
 
     dispute.status     := #resolved;
     dispute.resolvedAt := ?now;
@@ -263,12 +619,7 @@ module {
       resolvedBy = caller;
     };
 
-    // Update trade status based on outcome
-    switch (outcome) {
-      case (#seller_wins) { trade.status := #complete };
-      case (#buyer_wins)  { trade.status := #refunded };
-      case (#split)       { trade.status := #complete }; // split treated as complete for trade
-    };
+    applyDisputeTradeOutcome(trade, outcome);
 
     #ok(())
   };
@@ -290,7 +641,7 @@ module {
       case null return #err(#unauthorized);
     };
 
-    if (not isMod(moderator)) {
+    if (not isActiveModerator(moderator)) {
       return #err(#unauthorized);
     };
 
@@ -322,7 +673,7 @@ module {
       case null return #err(#unauthorized);
     };
 
-    if (not isMod(moderator)) {
+    if (not isActiveModerator(moderator)) {
       return #err(#unauthorized);
     };
 
@@ -341,7 +692,7 @@ module {
       case null return #err(#invalid_input("dispute has no resolvedAt timestamp"));
     };
 
-    let now = Time.now();
+    let now = Types.now();
     if (now - resolvedAt > APPEAL_WINDOW_NS) {
       return #err(#invalid_input("appeal window (7 days) has expired"));
     };
@@ -353,7 +704,7 @@ module {
 
     // Restore trade to #disputed
     switch (trades.get(dispute.trade)) {
-      case (?t) { t.status := #disputed };
+      case (?t) { freezeTradeForDispute(t, dispute.level) };
       case null {};
     };
 
@@ -395,7 +746,7 @@ module {
       case null return #err(#invalid_input("dispute has no resolvedAt timestamp"));
     };
 
-    let now = Time.now();
+    let now = Types.now();
     if (now - resolvedAt > APPEAL_WINDOW_NS) {
       return #err(#invalid_input("appeal window (7 days) has expired"));
     };
@@ -408,7 +759,7 @@ module {
     dispute.moderatorNotes := dispute.moderatorNotes.concat([note]);
 
     switch (trades.get(dispute.trade)) {
-      case (?t) { t.status := #disputed };
+      case (?t) { freezeTradeForDispute(t, dispute.level) };
       case null {};
     };
 
@@ -439,7 +790,7 @@ module {
       var activeDisputeIds = [];
       var resolvedCount    = 0;
       var successRate      = 0.0;
-      var registeredAt     = Time.now();
+      var registeredAt     = Types.now();
     };
 
     jurors.add(caller, entry);
@@ -507,7 +858,7 @@ module {
       return #err(#invalid_input("could not select enough jurors"));
     };
 
-    let now      = Time.now();
+    let now      = Types.now();
     let deadline = now + JURY_DEADLINE_NS;
     let jurorArr = selected.toArray();
 
@@ -569,7 +920,7 @@ module {
     };
 
     // Validate deadline BEFORE recording the vote
-    let now = Time.now();
+    let now = Types.now();
     if (now > assignment.deadline) {
       return #err(#invalid_input("Jury voting deadline has passed"));
     };
@@ -666,7 +1017,7 @@ module {
     consensusCount : Nat,
     totalAssigned  : Nat,
   ) {
-    let now = Time.now();
+    let now = Types.now();
     dispute.status     := #resolved;
     dispute.resolvedAt := ?now;
     dispute.resolution := ?{
@@ -676,13 +1027,7 @@ module {
     };
 
     switch (trades.get(dispute.trade)) {
-      case (?trade) {
-        switch (outcome) {
-          case (#buyer_wins)  { trade.status := #refunded };
-          case (#seller_wins) { trade.status := #complete };
-          case (#split)       { trade.status := #complete };
-        };
-      };
+      case (?trade) { applyDisputeTradeOutcome(trade, outcome) };
       case null {};
     };
 
@@ -759,7 +1104,7 @@ module {
       case null return false;
     };
 
-    let now = Time.now();
+    let now = Types.now();
     if (now > assignment.deadline) {
       dispute.status := #escalated_to_admin;
       true
@@ -781,7 +1126,7 @@ module {
       case null return #err(#unauthorized);
     };
 
-    if (not isMod(callerUser)) {
+    if (not isActiveModerator(callerUser)) {
       return #err(#unauthorized);
     };
 
@@ -871,15 +1216,24 @@ module {
   public func getDisputeJurors(
     juryMap   : Map.Map<Types.DisputeId, Types.JuryAssignment>,
     disputes  : Map.Map<Types.DisputeId, Types.Dispute>,
+    trades    : Map.Map<Types.TradeId, Types.Trade>,
+    users     : Map.Map<Types.UserId, Types.User>,
+    caller    : Principal,
     disputeId : Types.DisputeId,
   ) : ?Types.JuryView {
-    let assignment = switch (juryMap.get(disputeId)) {
-      case (?a) a;
-      case null return null;
-    };
+    assertNotAnonymous(caller);
 
     let dispute = switch (disputes.get(disputeId)) {
       case (?d) d;
+      case null return null;
+    };
+
+    if (not canAccessDisputeJurors(dispute, trades, users, caller)) {
+      return null;
+    };
+
+    let assignment = switch (juryMap.get(disputeId)) {
+      case (?a) a;
       case null return null;
     };
 
@@ -900,6 +1254,7 @@ module {
   /// Returns a dispute by id, stripping moderatorNotes for non-moderators.
   public func getDispute(
     disputes  : Map.Map<Types.DisputeId, Types.Dispute>,
+    trades    : Map.Map<Types.TradeId, Types.Trade>,
     juryMap   : Map.Map<Types.DisputeId, Types.JuryAssignment>,
     users     : Map.Map<Types.UserId, Types.User>,
     caller    : Principal,
@@ -910,10 +1265,11 @@ module {
       case null return null;
     };
 
-    let canSeeMod = switch (users.get(caller)) {
-      case (?u) isMod(u);
-      case null false;
+    if (not canAccessDispute(dispute, trades, juryMap, users, caller)) {
+      return null;
     };
+
+    let canSeeMod = canActAsModerator(users, caller);
 
     ?toView(dispute, juryMap, canSeeMod)
   };
@@ -921,19 +1277,27 @@ module {
   /// Returns all disputes for a given trade.
   public func getDisputesByTrade(
     disputes  : Map.Map<Types.DisputeId, Types.Dispute>,
+    trades    : Map.Map<Types.TradeId, Types.Trade>,
     juryMap   : Map.Map<Types.DisputeId, Types.JuryAssignment>,
     users     : Map.Map<Types.UserId, Types.User>,
     caller    : Principal,
     tradeId   : Types.TradeId,
   ) : [Types.DisputeView] {
-    let canSeeMod = switch (users.get(caller)) {
-      case (?u) isMod(u);
-      case null false;
+    let canSeeMod = canActAsModerator(users, caller);
+
+    let trade = switch (trades.get(tradeId)) {
+      case (?t) t;
+      case null return [];
     };
+    let isParty = isParticipant(trade, caller);
 
     disputes.entries()
       .filter(func(pair : (Types.DisputeId, Types.Dispute)) : Bool {
-        let (_, d) = pair; d.trade == tradeId
+        let (_, d) = pair;
+        if (d.trade != tradeId) return false;
+        if (canSeeMod or isParty) return true;
+        if (Principal.equal(d.initiator, caller)) return true;
+        isAssignedJuror(juryMap, d.id, caller)
       })
       .map(func(pair : (Types.DisputeId, Types.Dispute)) : Types.DisputeView {
         let (_, d) = pair; toView(d, juryMap, canSeeMod)
@@ -955,14 +1319,15 @@ module {
       case null return #err(#unauthorized);
     };
 
-    if (not isMod(moderator)) {
+    if (not isActiveModerator(moderator)) {
       return #err(#unauthorized);
     };
 
     let page = disputes.entries()
       .filter(func(pair : (Types.DisputeId, Types.Dispute)) : Bool {
         let (_, d) = pair;
-        d.status == #opened or d.status == #under_review or d.status == #escalated_to_admin
+        d.status == #opened or d.status == #l2_queued
+          or d.status == #under_review or d.status == #escalated_to_admin
       })
       .map(func(pair : (Types.DisputeId, Types.Dispute)) : Types.DisputeView {
         let (_, d) = pair; toView(d, juryMap, true)
@@ -1022,6 +1387,9 @@ module {
       case null null;
     };
 
+    let now = Types.now();
+    let slaFlags = computeSlaFlags(dispute, now);
+
     {
       id                  = dispute.id;
       trade               = dispute.trade;
@@ -1033,9 +1401,17 @@ module {
       status              = dispute.status;
       resolution          = dispute.resolution;
       createdAt           = dispute.createdAt;
-      resolvedAt          = dispute.resolvedAt;
+      resolvedAt          = Types.optNat(dispute.resolvedAt);
       moderatorNotes      = if (canSeeMod) dispute.moderatorNotes else [];
       jury                = juryOpt;
+      level               = dispute.level;
+      tradeKind           = dispute.tradeKind;
+      evidencePack        = dispute.evidencePack;
+      l1SlaDeadline       = dispute.l1SlaDeadline;
+      l2QueuedAt          = Types.optNat(dispute.l2QueuedAt);
+      l2TriageDeadline    = Types.optNat(dispute.l2TriageDeadline);
+      l2DecisionDeadline  = Types.optNat(dispute.l2DecisionDeadline);
+      slaFlags            = slaFlags;
     }
   };
 }

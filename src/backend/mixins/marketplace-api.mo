@@ -5,12 +5,15 @@ import Principal "mo:core/Principal";
 import Types "../types";
 import Auth "../lib/Auth";
 import Marketplace "../lib/Marketplace";
+import Engagement "../lib/Engagement";
 import Reputation "../lib/Reputation";
 import PaymentsLib "../lib/Payments";
 import RateLimiter "../lib/RateLimiter";
 import Admin "../lib/Admin";
 import CategoryCatalog "../lib/CategoryCatalog";
 import Time "mo:core/Time";
+import Stake "../lib/Stake";
+import DigitalDeliveryLib "../lib/DigitalDelivery";
 
 /// Marketplace mixin — public canister API for listing management.
 mixin (
@@ -23,12 +26,27 @@ mixin (
   auditLog    : List.List<Admin.AuditEntry>,
   nextAuditId : { var value : Nat },
   selfPrincipal : { var value : Principal },
+  savedSearches : Map.Map<Types.UserId, List.List<Types.SavedSearch>>,
+  notifications : Map.Map<Principal, List.List<Types.NotificationEvent>>,
+  nextNotificationId : { var value : Nat },
+  stakeBalances : Map.Map<Stake.StakeKey, Types.StakeBalance>,
+  listingStakes : Map.Map<Types.ListingId, Types.ListingStakeRecord>,
+  trades : Map.Map<Types.TradeId, Types.Trade>,
+  nextDigitalFileVersionId : { var value : Nat },
+  rateLimitDigitalUpload : Map.Map<Principal, (Nat, Types.Timestamp)>,
+  liabilityRecords : Map.Map<Nat, Types.LiabilityRecord>,
 ) {
 
   // ─── Create ───────────────────────────────────────────────────────────────
 
   public shared query func listCategories() : async [Types.CategoryNode] {
     CategoryCatalog.all()
+  };
+
+  public shared query func getCategoryAttributeSchema(
+    categoryId : Types.CategoryId,
+  ) : async [Types.CategoryAttributeField] {
+    CategoryCatalog.attributeSchema(categoryId)
   };
 
   public shared ({ caller }) func createListing(
@@ -50,6 +68,7 @@ mixin (
     novaPoshtaConfig  : ?Types.NovaPoshtaConfig,
     ukrposhtaConfig   : ?Types.UkrposhtaConfig,
     meestConfig       : ?Types.MeestConfig,
+    attributes        : [Types.CategoryAttributeValue],
   ) : async Types.Result<Types.ListingCard> {
     Auth.assertNotAnonymous(caller);
 
@@ -68,15 +87,14 @@ mixin (
 
     // ─── Reputation gate ────────────────────────────────────────────────────
     let priceUsdCents = PaymentsLib.tokenAmountToUsdCents(priceAmount, priceToken);
-    if (not Reputation.canTradeAmount(user.reputationScore, priceUsdCents)) {
-      return #err(#invalid_input(Reputation.gateError(user.reputationScore, priceUsdCents)));
+    if (not Reputation.canTradeAmountForUser(user.reputationScore, user.kycTier, priceUsdCents)) {
+      return #err(#invalid_input(Reputation.gateErrorForUser(user.reputationScore, user.kycTier, priceUsdCents)));
     };
     // ───────────────────────────────────────────────────────────────────────
 
     // ─── Liability gate ─────────────────────────────────────────────────────
-    let LIABILITY_BLOCK_THRESHOLD : Int = 10_000; // $100 in USD cents
-    if (user.liabilityBalance < 0 and Int.abs(user.liabilityBalance) > LIABILITY_BLOCK_THRESHOLD) {
-      return #err(#invalid_input("Your account has outstanding liability. Please settle before creating new listings."));
+    if (Reputation.isTradeBlocked(user)) {
+      return #err(#invalid_input(Reputation.tradeBlockedErrorUa(user, liabilityRecords)));
     };
     // ───────────────────────────────────────────────────────────────────────
 
@@ -93,18 +111,65 @@ mixin (
       digitalFileHash, digitalPassword,
       packageDetails, novaPoshtaConfig,
       ukrposhtaConfig, meestConfig,
+      attributes,
     );
 
     switch (result) {
       case (#err(e)) { #err(e) };
       case (#ok(card)) {
-        // Enrich card with real seller data
-        #ok({ card with
+        let enrichedCard = { card with
           sellerUsername   = user.username;
-          sellerRating     = user.reputationScore;
+          sellerRating     = user.sellerScore;
           sellerTrustLevel = user.trustLevel;
           sellerPrincipal  = caller;
-        })
+        };
+        // Digital drafts without uploaded file stay #draft until registerDigitalFile
+        // + publishListing (stake locks at publish, not create).
+        switch (listings.get(id)) {
+          case (?listing) {
+            switch (Marketplace.assertDigitalReadyForPublish(listing)) {
+              case (?_) return #ok(enrichedCard);
+              case null {};
+            };
+          };
+          case null {};
+        };
+        switch (
+          Stake.lockListingStake(
+            stakeBalances,
+            listingStakes,
+            id,
+            caller,
+            priceAmount,
+            priceToken,
+            Types.now(),
+          )
+        ) {
+          case (#err(#insufficient_funds)) {
+            // Listing saved as #draft — return card so seller can deposit and publishListing.
+            #ok(enrichedCard)
+          };
+          case (#err(e)) {
+            #err(e)
+          };
+          case (#ok(_)) {
+            switch (listings.get(id)) {
+              case (?listing) {
+                listing.status := #active;
+              };
+              case null {};
+            };
+            switch (listings.get(id)) {
+              case (?listing) {
+                Engagement.notifyMatchingSavedSearchAlerts(
+                  savedSearches, notifications, nextNotificationId, listing,
+                );
+              };
+              case null {};
+            };
+            #ok(enrichedCard)
+          };
+        }
       };
     }
   };
@@ -130,6 +195,7 @@ mixin (
     novaPoshtaConfig  : ?Types.NovaPoshtaConfig,
     ukrposhtaConfig   : ?Types.UkrposhtaConfig,
     meestConfig       : ?Types.MeestConfig,
+    attributes        : [Types.CategoryAttributeValue],
   ) : async Types.Result<()> {
     Auth.assertNotAnonymous(caller);
 
@@ -143,20 +209,19 @@ mixin (
 
     // ─── Reputation gate ────────────────────────────────────────────────────
     let priceUsdCents = PaymentsLib.tokenAmountToUsdCents(priceAmount, priceToken);
-    if (not Reputation.canTradeAmount(user.reputationScore, priceUsdCents)) {
-      return #err(#invalid_input(Reputation.gateError(user.reputationScore, priceUsdCents)));
+    if (not Reputation.canTradeAmountForUser(user.reputationScore, user.kycTier, priceUsdCents)) {
+      return #err(#invalid_input(Reputation.gateErrorForUser(user.reputationScore, user.kycTier, priceUsdCents)));
     };
     // ───────────────────────────────────────────────────────────────────────
 
     // ─── Liability gate ─────────────────────────────────────────────────────
-    let LIABILITY_BLOCK_THRESHOLD : Int = 10_000; // $100 in USD cents
-    if (user.liabilityBalance < 0 and Int.abs(user.liabilityBalance) > LIABILITY_BLOCK_THRESHOLD) {
-      return #err(#invalid_input("Your account has outstanding liability. Please settle before creating new listings."));
+    if (Reputation.isTradeBlocked(user)) {
+      return #err(#invalid_input(Reputation.tradeBlockedErrorUa(user, liabilityRecords)));
     };
     // ───────────────────────────────────────────────────────────────────────
 
     Marketplace.updateListing(
-      listings, caller, id,
+      listings, trades, caller, id,
       title, description, category, categoryId,
       priceAmount, priceToken, condition,
       photos, location, shippingMethods,
@@ -164,7 +229,53 @@ mixin (
       digitalFileHash, digitalPassword,
       packageDetails, novaPoshtaConfig,
       ukrposhtaConfig, meestConfig,
+      attributes,
     )
+  };
+
+  /// Register encrypted digital file metadata after object-storage upload (E2.S11).
+  public shared ({ caller }) func registerDigitalFile(
+    listingId : Types.ListingId,
+    blobHash : Text,
+    mimeType : Text,
+    sizeBytes : Nat,
+    blobUrl : Text,
+    dekHex : Text,
+    contentHash : ?Text,
+  ) : async Types.Result<Types.DigitalFileAsset> {
+    Auth.assertNotAnonymous(caller);
+    Auth.assertCallerNotBanned(users, caller);
+    if (not RateLimiter.check(caller, 60_000_000_000, 5, rateLimitDigitalUpload)) {
+      return #err(#rate_limited);
+    };
+
+    let versionId = nextDigitalFileVersionId.value;
+    nextDigitalFileVersionId.value += 1;
+
+    let result = DigitalDeliveryLib.registerDigitalFile(
+      listings, trades, caller, listingId, selfPrincipal.value,
+      versionId, blobHash, mimeType, sizeBytes, blobUrl, dekHex, contentHash,
+    );
+
+    switch (result) {
+      case (#ok(asset)) #ok(asset);
+      case (#err(#invalid_input(msg))) {
+        if (Text.contains(msg, #text "blocklisted")) {
+          let entry : Admin.AuditEntry = {
+            id = nextAuditId.value;
+            action = "digitalFileQuarantine";
+            actorId = caller;
+            targetId = ?listingId.toText();
+            timestamp = Types.now();
+            details = msg # " hash=" # blobHash;
+          };
+          auditLog.add(entry);
+          nextAuditId.value += 1;
+        };
+        #err(#invalid_input(msg))
+      };
+      case (#err(e)) #err(e);
+    }
   };
 
   // ─── Deactivate ───────────────────────────────────────────────────────────
@@ -188,6 +299,9 @@ mixin (
     id : Types.ListingId,
   ) : async Types.Result<()> {
     Auth.assertNotAnonymous(caller);
+    Auth.assertCallerNotBanned(users, caller);
+    let user = Auth.requireUser(users, caller);
+    Auth.assertNotBanned(user);
 
     // Rate limit: max 20 listing mutations per hour per principal
     if (not RateLimiter.check(caller, 3_600_000_000_000, 20, rateLimitListingMutations)) {
@@ -211,7 +325,7 @@ mixin (
         switch (users.get(listing.seller)) {
           case null null;
           case (?seller) {
-            ?Marketplace.toListingCard(listing, seller, Time.now())
+            ?Marketplace.toListingCard(listing, seller, Types.now())
           };
         }
       };
@@ -264,7 +378,7 @@ mixin (
     results.filterMap(func(l : Types.Listing) : ?Types.ListingCard {
       switch (users.get(l.seller)) {
         case null null;
-        case (?seller) { ?Marketplace.toListingCard(l, seller, Time.now()) };
+        case (?seller) { ?Marketplace.toListingCard(l, seller, Types.now()) };
       }
     })
   };
@@ -281,7 +395,23 @@ mixin (
     results.filterMap(func(l : Types.Listing) : ?Types.ListingCard {
       switch (users.get(l.seller)) {
         case null null;
-        case (?seller) { ?Marketplace.toListingCard(l, seller, Time.now()) };
+        case (?seller) { ?Marketplace.toListingCard(l, seller, Types.now()) };
+      }
+    })
+  };
+
+  /// Active listings only — for public seller profile (E2.S6).
+  public shared query func getPublicListingsByUser(
+    userId : Types.UserId,
+    offset : Nat,
+    limit  : Nat,
+  ) : async [Types.ListingCard] {
+    let results = Marketplace.getPublicListingsByUser(listings, userId, offset, limit);
+
+    results.filterMap(func(l : Types.Listing) : ?Types.ListingCard {
+      switch (users.get(l.seller)) {
+        case null null;
+        case (?seller) { ?Marketplace.toListingCard(l, seller, Types.now()) };
       }
     })
   };
@@ -295,7 +425,7 @@ mixin (
     results.filterMap(func(l : Types.Listing) : ?Types.ListingCard {
       switch (users.get(l.seller)) {
         case null null;
-        case (?seller) { ?Marketplace.toListingCard(l, seller, Time.now()) };
+        case (?seller) { ?Marketplace.toListingCard(l, seller, Types.now()) };
       }
     })
   };
@@ -346,7 +476,7 @@ mixin (
     results.filterMap(func(l : Types.Listing) : ?Types.ListingCard {
       switch (users.get(l.seller)) {
         case null null;
-        case (?seller) { ?Marketplace.toListingCard(l, seller, Time.now()) };
+        case (?seller) { ?Marketplace.toListingCard(l, seller, Types.now()) };
       }
     })
   };

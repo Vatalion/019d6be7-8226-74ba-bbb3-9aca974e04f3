@@ -1,3 +1,4 @@
+import { createActor } from "@/backend";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -9,14 +10,13 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  type ListingInquiryMessage,
   asEngagementActor,
   isResultErr,
-  type ListingInquiryMessage,
 } from "@/lib/engagementActor";
-import { createActor } from "@/backend";
 import { useActor, useInternetIdentity } from "@caffeineai/core-infrastructure";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Principal } from "@dfinity/principal";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MessageCircle } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -70,7 +70,11 @@ export function ListingInquiryPanel({
         throw new Error("Inquiries not available");
       }
       if (isOwner && buyerPrincipal) {
-        const r = await a.sendListingInquiryReply(listingId, buyerPrincipal, content);
+        const r = await a.sendListingInquiryReply(
+          listingId,
+          buyerPrincipal,
+          content,
+        );
         if (isResultErr(r)) throw new Error("send failed");
         return;
       }

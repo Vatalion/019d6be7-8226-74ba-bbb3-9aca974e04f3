@@ -6,8 +6,9 @@ import Types "../types";
 import Admin "../lib/Admin";
 import Auth "../lib/Auth";
 import ShippingLib "../lib/Shipping";
+import EscrowLib "../lib/Escrow";
 
-/// Shipping API mixin — HTTPS outcalls to Nova Poshta, Ukrposhta, Meest Express.
+/// Shipping API mixin
 /// Waybill management and shipment tracking with 5-minute response cache.
 ///
 /// State injected:
@@ -22,6 +23,7 @@ mixin (
   nextWaybillSeed : { var value : Nat },
   trades          : Map.Map<Types.TradeId, Types.Trade>,
   listings        : Map.Map<Types.ListingId, Types.Listing>,
+  trackingTimelines : Map.Map<Types.TradeId, [Types.TrackingTimelineEntry]>,
 ) {
 
   // ─── IC management canister actor type (http_request) ────────────────────
@@ -44,6 +46,25 @@ mixin (
   let shipIc : actor { http_request : ShipHttpRequestArgs -> async ShipHttpResponse } =
     actor "aaaaa-aa";
 
+  /// Strips all response headers so all replicas agree on the same response.
+  public shared query func transformShippingResponse(
+    raw : { response : ShipHttpResponse; context : Blob },
+  ) : async ShipHttpResponse {
+    {
+      status  = raw.response.status;
+      headers = [];
+      body    = raw.response.body;
+    }
+  };
+
+  let shippingTransform : ?{
+    function : shared query ({ response : ShipHttpResponse; context : Blob }) -> async ShipHttpResponse;
+    context  : Blob;
+  } = ?{
+    function = transformShippingResponse;
+    context  = "".encodeUtf8();
+  };
+
   // ─── Internal: generic HTTP helpers ──────────────────────────────────────
 
   func doPost(url : Text, body : Text, headers : [ShipHttpHeader]) : async { #ok : Text; #err : Text } {
@@ -54,7 +75,7 @@ mixin (
       headers         = headers;
       body            = ?bodyBlob;
       method          = #post;
-      transform       = null;
+      transform       = shippingTransform;
     };
     try {
       let resp = await (with cycles = 49_000_000) shipIc.http_request(args);
@@ -74,7 +95,7 @@ mixin (
       headers         = headers;
       body            = null;
       method          = #get;
-      transform       = null;
+      transform       = shippingTransform;
     };
     try {
       let resp = await (with cycles = 49_000_000) shipIc.http_request(args);
@@ -518,6 +539,12 @@ mixin (
       case (?t) t;
     };
 
+    if (not EscrowLib.isFulfillmentAllowed(trade.status)) {
+      return #err(#escrow_error(
+        "Cannot create TTN before payment is verified — complete PaymentIntent and explorer verification first"
+      ));
+    };
+
     // Load listing
     let listing = switch (listings.get(trade.listing)) {
       case null { return #err(#not_found) };
@@ -598,14 +625,12 @@ mixin (
     let description = ShippingLib.truncate(listing.title, 50);
 
     // Format today's date
-    let dateStr = ShippingLib.formatDateDDMMYYYY(Time.now());
+    let dateStr = ShippingLib.formatDateDDMMYYYY(Types.now());
 
-    // If no real API key, return a mock TTN
+    // Prod gate — no mock TTN without real Nova Poshta API key.
     if (not hasNpApiKey()) {
-      let mockTTN = ShippingLib.mockTrackingNumber(nextSeed());
-      trade.ttnNumber := ?mockTTN;
-      trade.ttnCreationStatus := #Success;
-      return #ok(mockTTN);
+      trade.ttnCreationStatus := #Failed;
+      return #err(#invalid_input("Nova Poshta API key required for TTN creation"));
     };
 
     let apiKey = resolveNpApiKey();
@@ -659,6 +684,18 @@ mixin (
     };
   };
 
+  /// After TTN creation, transition trade via unified markShipped path (E7.S3).
+  func finalizeTtnAndShip(
+    tradeId : Types.TradeId,
+    seller  : Principal,
+    ttn     : Text,
+  ) : async Types.Result<Text> {
+    switch (EscrowLib.markShipped(trades, seller, tradeId, ttn)) {
+      case (#ok(_)) #ok(ttn);
+      case (#err(e)) #err(e);
+    }
+  };
+
   /// Create a Nova Poshta TTN (waybill) for a specific trade.
   /// Only the seller of the trade may call this.
   /// On success: sets trade.ttnNumber and trade.ttnCreationStatus = #Success.
@@ -676,7 +713,10 @@ mixin (
       return #err(#unauthorized);
     };
 
-    await doCreateTTN(tradeId)
+    switch (await doCreateTTN(tradeId)) {
+      case (#err(e)) #err(e);
+      case (#ok(ttn)) await finalizeTtnAndShip(tradeId, caller, ttn);
+    }
   };
 
   /// Retry TTN creation for a trade (resets status and tries again).
@@ -884,7 +924,10 @@ mixin (
       case (?t) t;
     };
     if (not Principal.equal(trade.seller, caller)) { return #err(#unauthorized) };
-    await doCreateUkrposhtaTTN(tradeId)
+    switch (await doCreateUkrposhtaTTN(tradeId)) {
+      case (#err(e)) #err(e);
+      case (#ok(ttn)) await finalizeTtnAndShip(tradeId, caller, ttn);
+    }
   };
 
   /// Retry Ukrposhta TTN creation (resets status and tries again).
@@ -1017,7 +1060,10 @@ mixin (
       case (?t) t;
     };
     if (not Principal.equal(trade.seller, caller)) { return #err(#unauthorized) };
-    await doCreateMeestTTN(tradeId)
+    switch (await doCreateMeestTTN(tradeId)) {
+      case (#err(e)) #err(e);
+      case (#ok(ttn)) await finalizeTtnAndShip(tradeId, caller, ttn);
+    }
   };
 
   /// Retry Meest TTN creation (resets status and tries again).
@@ -1045,24 +1091,39 @@ mixin (
     "unified:" # debug_show(tradeId)
   };
 
+  func appendTrackingEvent(
+    tradeId : Types.TradeId,
+    status  : Text,
+    now     : Types.Timestamp,
+  ) : [Types.TrackingTimelineEntry] {
+    let entry : Types.TrackingTimelineEntry = { timestamp = now; status = status };
+    let updated = switch (trackingTimelines.get(tradeId)) {
+      case null {
+        let hist = [entry];
+        trackingTimelines.add(tradeId, hist);
+        hist
+      };
+      case (?hist) {
+        if (hist.size() == 0) {
+          let next = [entry];
+          trackingTimelines.add(tradeId, next);
+          next
+        } else {
+          let last = hist[hist.size() - 1];
+          if (last.status == status) hist else {
+            let next = hist.concat([entry]);
+            trackingTimelines.add(tradeId, next);
+            next
+          }
+        }
+      };
+    };
+    updated
+  };
+
   // Map raw carrier status strings to canonical unified status values.
   func mapToUnifiedStatus(raw : Text) : Text {
-    let lower = raw.toLower();
-    if (lower.contains(#text "delivered") or lower.contains(#text "доставлено") or lower.contains(#text "вручено")) {
-      "delivered"
-    } else if (lower.contains(#text "out_for_delivery") or lower.contains(#text "кур") or lower.contains(#text "виїхав")) {
-      "out_for_delivery"
-    } else if (lower.contains(#text "arrived") or lower.contains(#text "на відділенні") or lower.contains(#text "прибув")) {
-      "arrived_at_branch"
-    } else if (lower.contains(#text "transit") or lower.contains(#text "транзит") or lower.contains(#text "в дорозі") or lower.contains(#text "пересилається")) {
-      "in_transit"
-    } else if (lower.contains(#text "return") or lower.contains(#text "повернення")) {
-      "returned"
-    } else if (lower.contains(#text "exception") or lower.contains(#text "помилка")) {
-      "exception"
-    } else {
-      "created"
-    }
+    ShippingLib.mapToUnifiedStatus(raw)
   };
 
   /// Get unified tracking info for a trade regardless of carrier.
@@ -1086,6 +1147,12 @@ mixin (
       case (?t) t;
     };
 
+    let isParticipant = Principal.equal(trade.buyer, caller)
+      or Principal.equal(trade.seller, caller);
+    if (not isParticipant) {
+      return #err(#unauthorized);
+    };
+
     // Must have a tracking number
     let trackingNumber = switch (trade.ttnNumber) {
       case null return #err(#not_found);
@@ -1100,7 +1167,7 @@ mixin (
 
     // Check cache: stored as "carrier|status|isDelivered"
     let cacheKey = unifiedCacheKey(tradeId);
-    let now = Time.now();
+    let now = Types.now();
     switch (ShippingLib.getCachedTracking(shippingCache, cacheKey)) {
       case (?cached) {
         // Parse "carrier|status|0or1|timestamp"
@@ -1110,11 +1177,12 @@ mixin (
           let cachedCarrier  = partsArr[0];
           let cachedStatus   = partsArr[1];
           let cachedDelivered = partsArr[2] == "1";
+          let history = appendTrackingEvent(tradeId, cachedStatus, now);
           return #ok({
             carrier           = cachedCarrier;
             trackingNumber    = trackingNumber;
             status            = cachedStatus;
-            statusHistory     = [{ timestamp = now; status = cachedStatus }];
+            statusHistory     = history;
             estimatedDelivery = null;
             isDelivered       = cachedDelivered;
           });
@@ -1145,11 +1213,18 @@ mixin (
         // Store in shared cache: "carrier|status|deliveredBit"
         ShippingLib.putCachedTracking(shippingCache, cacheKey, carrier # "|" # unifiedStatus # "|" # deliveredBit);
 
+        let history = appendTrackingEvent(tradeId, unifiedStatus, now);
+        if (ShippingLib.isNpDeliveredStatus(unifiedStatus)) {
+          EscrowLib.recordNpDelivered(trade, now);
+        };
+        if (trade.status == #shipped) {
+          trade.status := #awaiting_receipt;
+        };
         #ok({
           carrier           = carrier;
           trackingNumber    = trackingNumber;
           status            = unifiedStatus;
-          statusHistory     = [{ timestamp = now; status = unifiedStatus }];
+          statusHistory     = history;
           estimatedDelivery = null;
           isDelivered       = isDelivered;
         })
@@ -1169,11 +1244,14 @@ mixin (
 
     // Check trade status allows confirmation
     let statusOk = switch (trade.status) {
-      case (#payment_verified) true;
-      case (#buyer_confirmed) true;
+      case (#shipped or #awaiting_receipt or #fulfillment_pending or #payment_verified) true;
       case _ false;
     };
     if (not statusOk) return false;
+
+    let isParticipant = Principal.equal(trade.buyer, caller)
+      or Principal.equal(trade.seller, caller);
+    if (not isParticipant) return false;
 
     // No TTN means no delivery confirmation
     switch (trade.ttnNumber) {
@@ -1198,6 +1276,49 @@ mixin (
     switch (await getUnifiedTrackingInfo(tradeId)) {
       case (#ok(info)) info.isDelivered;
       case (#err(_)) false;
+    };
+  };
+
+  // ─── Mark shipped with TTN validation (E7.S3) ─────────────────────────────
+
+  /// Seller submits a Nova Poshta TTN. Invalid format or carrier rejection
+  /// keeps the trade in fulfillment_pending.
+  public shared ({ caller }) func markShipped(
+    tradeId : Types.TradeId,
+    ttn     : Text,
+  ) : async Types.Result<()> {
+    Auth.assertNotAnonymous(caller);
+
+    let trade = switch (trades.get(tradeId)) {
+      case null return #err(#not_found);
+      case (?t) t;
+    };
+    if (not Principal.equal(trade.seller, caller)) {
+      return #err(#unauthorized);
+    };
+
+    if (not ShippingLib.isValidNpTtnFormat(ttn)) {
+      return #err(#invalid_input("Invalid Nova Poshta TTN format"));
+    };
+
+    let carrierAccepted = if (not hasNpApiKey()) {
+      true
+    } else {
+      let apiKey = resolveNpApiKey();
+      let reqBody = ShippingLib.buildTrackingRequest(apiKey, ttn);
+      switch (await npPost(reqBody)) {
+        case (#err(_)) false;
+        case (#ok(json)) ShippingLib.carrierAcceptsTtn(json);
+      };
+    };
+
+    if (not carrierAccepted) {
+      return #err(#invalid_input("Nova Poshta did not accept this TTN"));
+    };
+
+    switch (EscrowLib.markShipped(trades, caller, tradeId, ttn)) {
+      case (#ok(_)) #ok(());
+      case (#err(e)) #err(e);
     };
   };
 

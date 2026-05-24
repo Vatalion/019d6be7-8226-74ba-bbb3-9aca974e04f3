@@ -28,8 +28,10 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { type Locale, detectLocale, t } from "../../i18n";
 import {
+  DISABLED_PHYSICAL_SHIPPING_CARRIERS,
+  NOVA_POSHTA_SHIPPING_OPTION,
   PHYSICAL_DELIVERY_LOCKED_TO_PICKUP,
-  PICKUP_ONLY_SHIPPING_OPTION,
+  isEnabledPhysicalShippingCarrier,
 } from "../../lib/deliveryPolicy";
 
 // ─── Carrier metadata ────────────────────────────────────────────────────────
@@ -92,12 +94,7 @@ const CARRIER_META: Record<string, CarrierMeta> = {
   },
 };
 
-const CARRIER_ORDER: ShippingCarrier[] = [
-  "nova_poshta" as ShippingCarrier,
-  "ukrposhta" as ShippingCarrier,
-  "meest" as ShippingCarrier,
-  "self_pickup" as ShippingCarrier,
-];
+const CARRIER_ORDER: ShippingCarrier[] = ["nova_poshta" as ShippingCarrier];
 
 // Demo/mock prices when API key not configured
 const DEMO_OPTIONS: ShippingOptionWithCost[] = [
@@ -292,7 +289,7 @@ function PickupOnlyShippingProviderSelector({
 }: Pick<ShippingProviderSelectorProps, "selectedCarrier" | "onSelect"> & {
   locale: Locale;
 }) {
-  const isSelected = selectedCarrier === PICKUP_ONLY_SHIPPING_OPTION.carrier;
+  const isSelected = selectedCarrier === NOVA_POSHTA_SHIPPING_OPTION.carrier;
 
   return (
     <div className="space-y-4" data-ocid="shipping-provider-selector">
@@ -347,8 +344,8 @@ function PickupOnlyShippingProviderSelector({
           ].join(" ")}
           onClick={() =>
             onSelect?.(
-              PICKUP_ONLY_SHIPPING_OPTION.carrier,
-              PICKUP_ONLY_SHIPPING_OPTION,
+              NOVA_POSHTA_SHIPPING_OPTION.carrier,
+              NOVA_POSHTA_SHIPPING_OPTION,
             )
           }
           data-ocid="carrier-select-self_pickup"

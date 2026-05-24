@@ -10,6 +10,9 @@ import Auth "../lib/Auth";
 import Obs "../lib/Observability";
 import Marketplace "../lib/Marketplace";
 import Engagement "../lib/Engagement";
+import Reputation "../lib/Reputation";
+import Array "mo:core/Array";
+import Nat "mo:core/Nat";
 
 /// admin-api mixin — exposes all admin/moderator endpoints.
 /// State is injected from main.mo.
@@ -28,6 +31,8 @@ mixin (
   moduleMetrics   : Map.Map<Text, Obs.ModuleMetrics>,
   nextErrorId     : { var value : Nat },
   requestLog      : List.List<Obs.RequestMetric>,
+  liabilityRecords  : Map.Map<Nat, Types.LiabilityRecord>,
+  nextLiabilityId   : { var value : Nat },
 ) {
 
   // ─── User management ──────────────────────────────────────────────────────
@@ -332,7 +337,7 @@ mixin (
 
     let d = if (days == 0 or days > 365) 7 else days;
     let oneDayNs : Int = 86_400_000_000_000;
-    let now = Time.now();
+    let now = Types.now();
 
     // Bucket counts: index 0 = oldest day, d-1 = today
     let counts = List.tabulate<Nat>(d, func _ = 0);
@@ -373,7 +378,7 @@ mixin (
   } {
     Auth.assertNotAnonymous(caller);
     let user = Auth.requireUser(users, caller);
-    if (not Auth.isAdmin(user)) {
+    if (not Auth.canActAsAdmin(user)) {
       return { deletedCount = 0; photosToDelete = []; skippedByDispute = 0 };
     };
     let candidates = Marketplace.getResolvedForCleanup(listings);
@@ -418,9 +423,9 @@ mixin (
   ) : async Types.Result<()> {
     Auth.assertNotAnonymous(caller);
     let user = Auth.requireUser(users, caller);
-    if (not Auth.isAdmin(user)) return #err(#unauthorized);
+    if (not Auth.canActAsAdmin(user)) return #err(#unauthorized);
     Engagement.promoteListing(
-      listings, id, Time.now(), Engagement.defaultPromoteDurationNs(),
+      listings, id, Types.now(), Engagement.defaultPromoteDurationNs(),
     )
   };
 
@@ -445,6 +450,169 @@ mixin (
     };
 
     yr.toNat().toText() # "-" # pad2(mo) # "-" # pad2(dd)
+  };
+
+  public shared ({ caller }) func adminClearUserLiability(
+    target : Types.UserId,
+    note   : Text,
+  ) : async Types.Result<()> {
+    Auth.assertNotAnonymous(caller);
+    if (not Auth.canActAsAdmin(Auth.requireUser(users, caller))) {
+      return #err(#unauthorized);
+    };
+    switch (users.get(target)) {
+      case null { #err(#not_found) };
+      case (?user) {
+        Reputation.clearLiability(liabilityRecords, user, caller, note);
+        let newId = Admin.addComplianceNote(
+          users, complianceNotes, auditLog, nextAuditId.value, nextNoteId.value,
+          caller, target, "Liability cleared: " # note,
+        );
+        nextAuditId.value := newId.0;
+        nextNoteId.value := newId.1;
+        #ok(())
+      };
+    };
+  };
+
+  /// Admin partial clear on a specific liability record (E6.S6 AC3).
+  public shared ({ caller }) func adminPartialClearLiability(
+    liabilityId      : Nat,
+    clearAmountCents : Nat,
+    note             : Text,
+  ) : async Types.Result<()> {
+    Auth.assertNotAnonymous(caller);
+    if (not Auth.canActAsAdmin(Auth.requireUser(users, caller))) {
+      return #err(#unauthorized);
+    };
+    if (note.size() == 0 or note.size() > 500) {
+      return #err(#invalid_input("Note must be 1–500 characters"));
+    };
+    switch (liabilityRecords.get(liabilityId)) {
+      case null { #err(#not_found) };
+      case (?rec) {
+        switch (users.get(rec.userId)) {
+          case null { #err(#not_found) };
+          case (?user) {
+            switch (
+              Reputation.partialClearLiability(
+                liabilityRecords, user, liabilityId, clearAmountCents, caller, note,
+              )
+            ) {
+              case (#err(e)) return #err(e);
+              case (#ok(())) {};
+            };
+            let auditMsg = "Partial liability clear #" # liabilityId.toText() #
+              " amount=" # clearAmountCents.toText() # " note=" # note;
+            let newId = Admin.addComplianceNote(
+              users, complianceNotes, auditLog, nextAuditId.value, nextNoteId.value,
+              caller, rec.userId, auditMsg,
+            );
+            nextAuditId.value := newId.0;
+            nextNoteId.value := newId.1;
+            #ok(())
+          };
+        };
+      };
+    };
+  };
+
+  /// Admin liability dashboard — sorted by severity then age (E6.S6 AC5).
+  public shared query ({ caller }) func adminListLiabilities(
+    offset : Nat,
+    limit  : Nat,
+  ) : async Types.Result<[Types.LiabilityRecordView]> {
+    Auth.assertNotAnonymous(caller);
+    if (not Auth.canActAsAdmin(Auth.requireUser(users, caller))) {
+      return #err(#unauthorized);
+    };
+    let sorted = Reputation.sortedLiabilitiesForAdmin(liabilityRecords);
+    let safeLimit = if (limit == 0) 50 else Nat.min(limit, 100);
+    let end = Nat.min(offset + safeLimit, sorted.size());
+    let slice = if (offset >= sorted.size()) {
+      [] : [Types.LiabilityRecordView]
+    } else {
+      sorted.sliceToArray(offset.toInt(), end.toInt())
+    };
+    #ok(slice)
+  };
+
+  /// Public read — on-chain escrow config for frontend (Gate C). No auth required.
+  public query func getPlatformFlags() : async {
+    trustlessEscrowEnabled : Bool;
+    ckUsdcLedgerId : Text;
+    ckUsdtLedgerId : Text;
+  } {
+    {
+      trustlessEscrowEnabled = systemSettings.trustlessEscrowEnabled;
+      ckUsdcLedgerId = systemSettings.ckUsdcLedgerId;
+      ckUsdtLedgerId = systemSettings.ckUsdtLedgerId;
+    };
+  };
+
+  public shared ({ caller }) func adminSetTrustlessEscrowEnabled(
+    enabled : Bool,
+    securitySignOffRef : Text,
+  ) : async Types.Result<()> {
+    Auth.assertNotAnonymous(caller);
+    switch (
+      Admin.setTrustlessEscrowEnabled(
+        users, systemSettings, auditLog, nextAuditId.value, caller, enabled,
+        securitySignOffRef,
+      )
+    ) {
+      case (#ok(newId)) {
+        nextAuditId.value := newId;
+        #ok(());
+      };
+      case (#err(e)) #err(e);
+    };
+  };
+
+  /// Admin read — Gate C security checklist (E9.S6).
+  public shared query ({ caller }) func adminGetGateCChecklist() : async Admin.GateCChecklistView {
+    Auth.assertNotAnonymous(caller);
+    if (not Auth.canActAsAdmin(Auth.requireUser(users, caller))) {
+      Prim.trap("admin only");
+    };
+    Admin.gateCChecklistView(systemSettings)
+  };
+
+  /// Admin update — Gate C checklist items (E9.S6).
+  public shared ({ caller }) func adminUpdateGateCChecklist(
+    testnetE2ePassed : ?Bool,
+    rollbackTestsPassed : ?Bool,
+    subaccountDesignReviewed : ?Bool,
+    betaCapsConfigured : ?Bool,
+    ckBetaCapUsdCents : ?Nat,
+  ) : async () {
+    Auth.assertNotAnonymous(caller);
+    let newId = Admin.updateGateCChecklist(
+      users, systemSettings, auditLog, nextAuditId.value, caller,
+      testnetE2ePassed, rollbackTestsPassed, subaccountDesignReviewed,
+      betaCapsConfigured, ckBetaCapUsdCents,
+    );
+    nextAuditId.value := newId;
+  };
+
+  public shared ({ caller }) func adminSetUserKycTier(
+    target : Types.UserId,
+    tier   : Types.KycTier,
+  ) : async Types.Result<()> {
+    Auth.assertNotAnonymous(caller);
+    if (not Auth.canActAsAdmin(Auth.requireUser(users, caller))) {
+      return #err(#unauthorized);
+    };
+    switch (users.get(target)) {
+      case null { #err(#not_found) };
+      case (?_) {
+        let newId = Admin.setUserKycTier(
+          users, auditLog, nextAuditId.value, caller, target, tier,
+        );
+        nextAuditId.value := newId;
+        #ok(())
+      };
+    };
   };
 
 }

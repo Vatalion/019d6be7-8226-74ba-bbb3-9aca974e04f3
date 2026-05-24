@@ -29,7 +29,7 @@ const translations = {
     "nav.badge_unread_messages": "unread messages",
 
     // Hero
-    "hero.badge": "Crypto classifieds — like OLX, pay in stablecoins",
+    "hero.badge": "Crypto classifieds — pay in stablecoins",
     "hero.title": "Buy & Sell Goods with Crypto —",
     "hero.titleHighlight": "No Fiat Step",
     "hero.subtitle":
@@ -63,7 +63,8 @@ const translations = {
 
     // How it works
     "hiw.title": "How It Works",
-    "hiw.subtitle": "Three steps — goods first, stablecoins only, platform-backed rules",
+    "hiw.subtitle":
+      "Three steps — goods first, stablecoins only, platform-backed rules",
     "hiw.step1.title": "Post a Listing",
     "hiw.step1.desc":
       "Describe your item, set a price in USDT or USDC, add photos, and choose pickup or digital delivery. Your listing goes live instantly.",
@@ -88,9 +89,30 @@ const translations = {
 
     // Trade statuses
     "trade.status.pending": "Trade initiated",
+    "trade.status.awaiting_seller_handshake": "Awaiting seller confirmation",
+    "trade.status.payment_intent": "Ready for payment",
+    "trade.status.manual_payment_pending": "Awaiting payment confirmation",
+    "trade.status.payment_intent_expired": "Payment window expired",
+    "trade.action.createPaymentIntent": "Open payment for buyer",
+    "trade.paymentIntent.title": "Payment instructions",
+    "trade.paymentIntent.amount": "Amount to send",
+    "trade.paymentIntent.recipient": "Recipient address",
+    "trade.paymentIntent.expiry": "Pay before",
+    "trade.paymentIntent.gasWarning": "High Ethereum network fees apply.",
+    "trade.paymentIntent.coordinatedNote":
+      "Coordinated settlement — not trustless escrow. Send the exact token on Ethereum ERC20 only.",
+    "trade.paymentPath.manualTitle": "Manual coordinated payment",
+    "trade.paymentPath.mutuallyExclusive":
+      "Manual ERC20 and ckUSDC/ckUSDT trustless escrow are mutually exclusive — this trade uses manual settlement.",
+    "trade.status.cancelled_no_seller_response":
+      "Cancelled — seller did not respond",
     "trade.status.funded": "Awaiting payment",
     "trade.status.buyer_confirmed": "Awaiting seller confirmation",
     "trade.status.payment_verified": "Payment confirmed — completing",
+    "trade.status.digital_delivered": "Digital file delivered — 24h inspection",
+    "trade.status.fulfillment_pending": "Ready to ship",
+    "trade.status.shipped": "Shipped",
+    "trade.status.awaiting_receipt": "Awaiting receipt",
     "trade.status.complete": "Trade complete",
     "trade.status.refunded": "Refunded",
     "trade.status.disputed": "Under dispute",
@@ -157,6 +179,19 @@ const translations = {
     "create.photoUrlsMissing":
       "Photo upload incomplete — try removing and re-adding photos",
     "create.submitFailed": "Failed to publish listing",
+    "create.stake.title": "Seller listing stake",
+    "create.stake.required": "Required stake (5% min 10 USDT)",
+    "create.stake.available": "Your stake balance",
+    "create.stake.locked": "Locked on listings",
+    "create.stake.depositHint":
+      "Deposit stake to your platform seller balance before publishing (internal ledger — not on-chain collateral until a later phase). Funds stay locked until the claim period after a successful sale.",
+    "create.stake.depositBtn": "Deposit required stake",
+    "create.stake.depositing": "Depositing…",
+    "create.stake.depositOk": "Stake deposited",
+    "create.stake.insufficient":
+      "Insufficient stake balance. Deposit at least the required amount — your listing stays draft until stake is locked.",
+    "create.stake.draftSaved": "Listing saved as draft",
+    "create.stake.rule": "max(5% of price, 10 USDT) locked before publish",
     "create.updateFailed": "Failed to update listing",
     "create.error.noProfile":
       "Please create your profile first before publishing a listing",
@@ -209,7 +244,9 @@ const translations = {
     "create.validation.category": "Select a category",
     "create.validation.condition": "Select a condition",
     "create.validation.description": "Description is required",
-    "create.validation.digitalUrl": "Digital file URL is required",
+    "create.field.digitalFile": "Digital file",
+    "create.validation.digitalFile":
+      "Upload a digital file (pdf, zip, png, jpg, epub, mp4 — max 500MB)",
     "create.validation.price": "Enter a valid price greater than 0",
     "create.validation.location": "Location is required",
     "create.validation.carrier": "Select a shipping carrier",
@@ -241,6 +278,37 @@ const translations = {
     "detail.signInToBuy": "Sign in to Buy",
     "detail.selectShippingAndBuy": "Select Shipping & Buy",
     "detail.proceedCheckout": "Proceed to Checkout",
+    "detail.checkout.title": "Review before you buy",
+    "detail.checkout.itemPrice": "Item price",
+    "detail.checkout.platformFee": "Platform fee ({percent})",
+    "detail.checkout.network": "Payment network",
+    "detail.checkout.delivery": "Delivery",
+    "detail.checkout.total": "Total you pay",
+    "detail.checkout.fundsNotLocked":
+      "Your funds are not locked yet. Payment steps open after the seller accepts your request.",
+    "detail.checkout.defaultFeeNote": "Standard platform rate (3%) applies.",
+    "detail.checkout.manualNote":
+      "Phase 1 uses platform-coordinated manual settlement — not trustless on-chain escrow for this token.",
+    "detail.checkout.confirm": "Confirm and start trade",
+    "detail.checkout.loading": "Loading fee breakdown…",
+    "detail.checkout.unavailable":
+      "Fee breakdown unavailable — using standard 3% estimate.",
+    "detail.tradeCap.title": "Beta trade limits",
+    "detail.tradeCap.standard": "Standard beta rules apply (up to 500 USDT).",
+    "detail.tradeCap.elevated":
+      "Elevated tier (500–1000 USDT): seller verified tier or listing stake ≥10% (min 50 USDT) required.",
+    "detail.tradeCap.elevatedVerifiedOk": "Seller has verified tier.",
+    "detail.tradeCap.elevatedStakeOk":
+      "Seller listing stake meets elevated requirement.",
+    "detail.tradeCap.elevatedStakeMissing":
+      "Seller needs verified tier or higher listing stake.",
+    "detail.tradeCap.highValueCk":
+      "High-value (>1000 USDT): ckUSDC/ckUSDT only with Gate C trustless escrow — manual settlement not available.",
+    "detail.tradeCap.gateCOff":
+      "Gate C is off — high-value ck trades unavailable.",
+    "detail.tradeCap.rejected":
+      "This listing exceeds the 5000 USDT beta limit.",
+    "detail.tradeCap.blocked": "Trade cannot start under current beta caps.",
     // TODO: rename key when backend contract changes
     "detail.escrowNote":
       "Both parties have agreed to the trade terms. Complete your manual steps above.",
@@ -254,9 +322,23 @@ const translations = {
     "detail.notFound": "Listing not found",
     "detail.notFoundDesc":
       "This listing may have been removed or doesn't exist.",
+    "detail.loadError":
+      "Could not load this listing. Check your connection and try again.",
+    "detail.retry": "Try again",
+    "detail.buyError": "Could not start the trade. Please try again.",
+    "detail.startingTrade": "Starting trade…",
     "detail.browseListings": "Browse listings",
     "detail.shareLink": "Share",
+    "detail.shareVia": "Share via",
+    "detail.share.telegram": "Telegram",
+    "detail.share.whatsapp": "WhatsApp",
+    "detail.share.viber": "Viber",
+    "detail.share.facebook": "Facebook",
+    "detail.share.x": "X (Twitter)",
+    "detail.share.email": "Email",
+    "detail.share.copyLink": "Copy link",
     "detail.linkCopied": "Link copied",
+    "detail.shareError": "Could not open share options",
     "detail.reportListing": "Report",
     "detail.reportTitle": "Report this listing",
     "detail.reportDesc":
@@ -268,6 +350,8 @@ const translations = {
     "detail.signInToReport": "Sign in to report listings",
     "detail.onChainEscrowBeta":
       "On-chain escrow (ckUSDC/ckUSDT) is in beta — see How payments work.",
+    "detail.onChainEscrowPrimary":
+      "Trustless escrow: ckUSDC/ckUSDT are locked on-chain in the marketplace canister when you buy.",
     "privacy.title": "Privacy & pseudonymity",
     "privacy.backHome": "Back to home",
     "privacy.intro":
@@ -276,11 +360,14 @@ const translations = {
     "privacy.pseudonymousBody":
       "Your public profile shows a username and reputation — not your real identity. Other users cannot see your full principal ID on your profile.",
     "privacy.weStoreTitle": "What we store on-chain",
-    "privacy.weStore1": "Username, avatar URL, listings, trades, and messages tied to your II principal",
+    "privacy.weStore1":
+      "Username, avatar URL, listings, trades, and messages tied to your II principal",
     "privacy.weStore2": "Trade and dispute history for platform rules",
-    "privacy.weStore3": "Optional payment addresses you add for receiving crypto",
+    "privacy.weStore3":
+      "Optional payment addresses you add for receiving crypto",
     "privacy.weDoNotTitle": "What we do not do",
-    "privacy.weDoNot1": "No custodial fiat wallets or bank account collection in Phase 1",
+    "privacy.weDoNot1":
+      "No custodial fiat wallets or bank account collection in Phase 1",
     "privacy.weDoNot2": "No mandatory KYC for basic marketplace use",
     "privacy.weDoNot3": "No selling of personal data to third parties",
     "privacy.paymentsLink": "How payments work (Phase 1 vs trustless path)",
@@ -390,7 +477,7 @@ const translations = {
     // Footer
     "paymentsGuide.title": "How payments work",
     "paymentsGuide.intro":
-      "CryptoMarket is an OLX-style goods marketplace. Stablecoins move wallet-to-wallet; the platform coordinates trade state and disputes — it does not custody your funds in Phase 1.",
+      "CryptoMarket is a P2P goods marketplace. Stablecoins move wallet-to-wallet; the platform coordinates trade state and disputes — it does not custody your funds in Phase 1.",
     "paymentsGuide.honestyBanner":
       "We do not call Phase 1 “trustless escrow”. Funds are not locked on-chain by the platform until a later phase ships.",
     "paymentsGuide.backHome": "Back to home",
@@ -409,7 +496,8 @@ const translations = {
     "paymentsGuide.phase2.title": "Phase 2 — Stronger verification",
     "paymentsGuide.phase2.body":
       "Explorer checks and retries improve confidence that the right amount reached the seller’s address.",
-    "paymentsGuide.phase2.item1": "Supported tokens: USDT (TRC20, BEP20, ERC20) and USDC (ERC20).",
+    "paymentsGuide.phase2.item1":
+      "Supported tokens: USDT (TRC20, BEP20, ERC20) and USDC (ERC20).",
     "paymentsGuide.phase2.item2":
       "If verification fails, manual confirmation still completes the trade.",
     "paymentsGuide.phase3.title": "Phase 3 — On-chain settlement (planned)",
@@ -417,6 +505,40 @@ const translations = {
       "Future releases may lock funds under protocol rules. We will update marketing only when that ships.",
     "paymentsGuide.phase3.item1":
       "No “atomic swap” or “trustless escrow” promise before Phase 3 is live.",
+    "insurance.section.title":
+      "Buyer protection — capped reserve (not a full guarantee)",
+    "insurance.section.body":
+      "A separate insurance reserve ledger accrues 40% of platform fees. Payouts are last-resort, strictly capped, and require dual-admin approval — never marketed as unlimited refund.",
+    "insurance.section.item1":
+      "Trades above 500 USDT: seller stake only — insurance path not offered.",
+    "insurance.section.item2":
+      "When the reserve is empty, we show honest copy: no full-refund guarantee.",
+    "insurance.section.item3":
+      "When funded: payouts capped at min(loss, 20% of liquid fund, 100 USDT/day, 500 USDT/trade).",
+    "insurance.protection.stake_only.title": "Stake-only protection",
+    "insurance.protection.stake_only.body":
+      "This trade is above the 500 USDT insurance beta cap. Protection is limited to the seller’s listing stake — not the insurance reserve.",
+    "insurance.protection.no_guarantee.title": "No full-refund guarantee",
+    "insurance.protection.no_guarantee.body":
+      "The insurance reserve is currently empty. We do not promise full reimbursement — only seller stake seizure and account restrictions may apply.",
+    "insurance.protection.capped_reserve.title": "Capped reserve (last resort)",
+    "insurance.protection.capped_reserve.body":
+      "A limited insurance reserve may cover part of seller-fault losses after stake — not an unlimited guarantee. Caps: 500 USDT/trade, 100 USDT/day, max 20% of the liquid fund.",
+    "waterfall.settlement.manual_restriction_only.title":
+      "Manual settlement — no custodial recovery",
+    "waterfall.settlement.manual_restriction_only.body":
+      "This trade used coordinated off-chain payment. We cannot recover buyer funds from the platform — only the seller's listing stake may be seized and their account restricted until the debt is cleared.",
+    "waterfall.settlement.partial_recovery.title": "Partial recovery only",
+    "waterfall.settlement.partial_recovery.body":
+      "Partial reimbursement from seller stake and/or the capped insurance reserve may apply. The remainder is recorded as seller liability with account restrictions — not a full refund promise.",
+    "waterfall.settlement.on_chain_recovery.title":
+      "On-chain refund + seller accountability",
+    "waterfall.settlement.on_chain_recovery.body":
+      "Locked ck funds are refunded on-chain to the buyer. Seller stake was seized first; any residual seller debt is tracked with account restrictions.",
+    "waterfall.settlement.on_chain_refund_note":
+      "On-chain escrow refund to the buyer is processed separately from stake and insurance steps.",
+    "waterfall.settlement.residual_note":
+      "Outstanding seller liability may restrict new listings and trades until cleared.",
     "footer.builtWith": "Built with love using",
 
     // Common
@@ -446,6 +568,11 @@ const translations = {
     "filter.any": "Any",
 
     // Trades page
+    "trade.loadError":
+      "Could not load this trade. Check your connection and try again.",
+    "trade.notFound": "Trade not found",
+    "trades.loadError":
+      "Could not load your trades. Check your connection and try again.",
     "trades.title": "My Trades",
     "trades.subtitle": "Track all your active and completed trades",
     "trades.tab.buying": "Buying",
@@ -461,6 +588,18 @@ const translations = {
     "search.placeholder": "Search listings…",
     "search.ariaLabel": "Search listings",
     "search.clearAriaLabel": "Clear search",
+
+    // Saved searches
+    "savedSearch.title": "Saved searches",
+    "savedSearch.saveCurrent": "Save current filters",
+    "savedSearch.namePlaceholder": "e.g. Kyiv electronics",
+    "savedSearch.saveButton": "Save",
+    "savedSearch.saved": "Search saved",
+    "savedSearch.saveError": "Could not save search",
+    "savedSearch.empty": "No saved searches yet.",
+    "savedSearch.delete": "Delete saved search",
+    "savedSearch.alertsLabel": "New listing alerts",
+    "savedSearch.alertToggleError": "Could not update alerts",
 
     // Payment Verification Widget
     "verify.title": "Verify Payment on Blockchain",
@@ -539,6 +678,13 @@ const translations = {
     "escrow.terminal.refunded.desc": "Payment returned to buyer",
     "escrow.terminal.cancelled.label": "Cancelled",
     "escrow.terminal.cancelled.desc": "Trade cancelled by mutual agreement",
+    "escrow.terminal.cancelled_no_seller_response.label":
+      "Seller did not respond",
+    "escrow.terminal.cancelled_no_seller_response.desc":
+      "The 24-hour confirmation window expired or the seller declined. You receive a full refund — no funds were locked.",
+    "escrow.terminal.cancelled_buyer_pre_ship.label": "Cancelled by buyer",
+    "escrow.terminal.cancelled_buyer_pre_ship.desc":
+      "You cancelled before shipment. Refund split: 85% buyer, 10% seller, 5% platform.",
 
     // Chat
     "chat.title": "Chat",
@@ -567,7 +713,12 @@ const translations = {
     "reputation.averageRating": "Average Rating",
     "reputation.trustLevel": "Trust Level",
     "reputation.disputeRate": "Dispute Rate",
+    "reputation.buyerScore": "Buyer score",
+    "reputation.sellerScore": "Seller score",
     "reputation.ratingAriaLabel": "{value} out of 5 stars",
+    "create.categoryAttributes.title": "Category details",
+    "create.validation.requiredAttribute":
+      "This field is required for the selected category",
 
     // Admin — Phase 2 metrics
     "admin.metrics.title": "Platform Metrics",
@@ -636,6 +787,7 @@ const translations = {
     "admin.tab.overview": "Overview",
     "admin.tab.users": "Users",
     "admin.tab.disputes": "Disputes",
+    "admin.tab.liabilities": "Liabilities",
     "admin.tab.listings": "Listings",
     "admin.tab.audit": "Audit Log",
     "admin.tab.settings": "Settings",
@@ -650,6 +802,27 @@ const translations = {
     "admin.listings.colActions": "Actions",
     "admin.listings.remove": "Remove",
     "admin.listings.removing": "Removing…",
+    "admin.listings.promoteTitle": "Promote listing (VIP)",
+    "admin.listings.promoteHint":
+      "Enter listing ID to boost placement in search results.",
+    "admin.listings.promotePlaceholder": "Listing ID",
+    "admin.listings.promote": "Promote",
+    "admin.listings.promoting": "Promoting…",
+    "admin.listings.promoteSuccess": "Listing promoted",
+    "admin.liability.title": "Global liability queue",
+    "admin.liability.empty": "No open liabilities.",
+    "admin.liability.col.id": "ID",
+    "admin.liability.col.user": "User",
+    "admin.liability.col.remaining": "Remaining",
+    "admin.liability.col.reason": "Reason",
+    "admin.liability.col.status": "Status",
+    "admin.liability.col.age": "Age",
+    "admin.liability.col.partialClear": "Partial clear",
+    "admin.liability.amountPlaceholder": "Cents to clear",
+    "admin.liability.notePlaceholder": "Audit note",
+    "admin.liability.partialClear.action": "Apply partial clear",
+    "admin.liability.partialClear.success": "Partial liability clear applied",
+    "admin.liability.partialClear.invalid": "Enter amount (cents) and note",
     "admin.signInDesc":
       "Sign in with Internet Identity to access the admin panel.",
     "admin.signIn": "Sign in with Internet Identity",
@@ -663,6 +836,7 @@ const translations = {
     "admin.users.col.trust": "Trust",
     "admin.users.col.status": "Status",
     "admin.users.col.score": "Score",
+    "admin.users.col.kyc": "KYC",
     "admin.users.col.registered": "Registered",
     "admin.users.col.actions": "Actions",
     "admin.users.status.active": "Active",
@@ -690,6 +864,38 @@ const translations = {
     "admin.users.suspendFailed": "Failed to suspend user",
     "admin.users.promoted": "User promoted to moderator",
     "admin.users.promoteFailed": "Failed to promote user",
+    "admin.users.action.verifyKyc": "Grant verified tier",
+    "admin.users.action.revokeKyc": "Revoke verified tier",
+    "admin.users.kycUpdated": "KYC tier updated",
+    "admin.users.kycUpdateFailed": "Failed to update KYC tier",
+
+    "admin.trustlessEscrow.title": "On-chain escrow (Gate C)",
+    "admin.trustlessEscrow.hint":
+      "When disabled, initiateOnChainTrade rejects and no public CTA is shown. Enable only after testnet E2E and owner sign-off.",
+    "admin.trustlessEscrow.enable": "Allow ICRC-2 fund lock API",
+    "admin.trustlessEscrow.gateCWarning":
+      "Enabled — ensure Gate C checklist is complete before marketing on-chain escrow.",
+    "admin.trustlessEscrow.disabled":
+      "On-chain escrow disabled — in-flight ck trades may still complete",
+    "admin.trustlessEscrow.checklistTitle":
+      "Security checklist (required before enable)",
+    "admin.trustlessEscrow.checklist.testnetE2e": "Testnet ckUSDC E2E passed",
+    "admin.trustlessEscrow.checklist.rollbackTests":
+      "ICRC lock rollback tests green",
+    "admin.trustlessEscrow.checklist.subaccountDesign":
+      "Escrow subaccount design reviewed",
+    "admin.trustlessEscrow.checklist.betaCaps":
+      "Beta cap (500 USDT) configured",
+    "admin.trustlessEscrow.betaCapLabel": "ck beta cap",
+    "admin.trustlessEscrow.signOffRef": "Security sign-off reference",
+    "admin.trustlessEscrow.signOffPlaceholder": "e.g. SEC-2026-001 or doc URL",
+    "admin.trustlessEscrow.checklistIncomplete":
+      "Complete all checklist items and provide sign-off before enabling Gate C.",
+    "admin.trustlessEscrow.saved": "On-chain escrow flag saved",
+    "admin.trustlessEscrow.saveFailed": "Failed to save on-chain escrow flag",
+    "admin.trustlessEscrow.refresh": "Refresh",
+
+    "profile.kyc.verified": "Verified seller",
 
     // Sidebar
     "sidebar.toggle": "Toggle Sidebar",
@@ -779,6 +985,7 @@ const translations = {
     "header.balance.loading": "Loading…",
     "header.balance.error": "Unavailable",
     "header.balance.refreshing": "Refreshing…",
+    "header.balance.refresh": "Refresh balance",
 
     // governance.* namespace (Phase 3)
     "governance.pageTitle": "Governance",
@@ -1060,6 +1267,8 @@ const translations = {
       "Compare this hash with the downloaded file to verify its integrity.",
     "digital.delivery.inspectionCountdown":
       "You have {hours}h {minutes}m to open a dispute if the file is incorrect.",
+    "digital.delivery.inspectionRedownloadNote":
+      "After download you have 24 hours to inspect. Re-downloading does not extend the deadline.",
     "digital.delivery.inspectionExpired":
       "Inspection period ended. Funds have been released to the seller.",
 
@@ -1115,6 +1324,21 @@ const translations = {
     "payment.save": "Save Address",
     "payment.saved": "Address saved!",
     "payment.savedMethods": "Saved Payment Methods",
+    "walletLink.connectWithProof": "Connect wallet with signed proof",
+    "walletLink.signing": "Waiting for wallet signature…",
+    "walletLink.linked": "Wallet linked with nonce proof.",
+    "walletLink.linkFailed":
+      "Could not link wallet — check signature and try again.",
+    "walletLink.challengeFailed": "Could not request link nonce from backend.",
+    "walletLink.unsupportedToken":
+      "Wallet proof linking is not available for this token yet.",
+    "walletLink.antiphishing":
+      "Sign the platform message in your wallet to prove you control this address. CryptoMarket never asks for your seed phrase.",
+    "walletLink.profileTitle": "Linked external wallets",
+    "walletLink.profileEmpty": "No wallets linked with signed proof yet.",
+    "walletLink.addWallet": "Link wallet",
+    "walletLink.unlinked": "Wallet unlinked.",
+    "walletLink.unlinkFailed": "Could not unlink wallet.",
     "payment.noMethods": "No payment methods added yet.",
     "payment.remove": "Remove",
     "payment.scanQR": "Scan QR",
@@ -1172,6 +1396,7 @@ const translations = {
 
     // Toast actions
     "toast.view_trade": "View Trade",
+    "toast.view_listing": "View listing",
 
     // Notifications
     "notification.trade_funded": "Trade funded. Awaiting your confirmation.",
@@ -1189,6 +1414,7 @@ const translations = {
       "Trade has been funded for 48h. Please verify payment.",
     "notification.deadline_jury_12h":
       "Jury deadline for Trade is in less than 12 hours.",
+    "notification.saved_search_match": "New listing matches your saved search",
 
     // Profile public view
     "profile.notFound.title": "Seller not found",
@@ -1212,16 +1438,43 @@ const translations = {
     "detail.inactiveBanner": "This listing is inactive",
     "profile.tabs.active": "Active",
     "profile.tabs.inactive": "Inactive",
+    "profile.privacy.title": "Privacy & data",
+    "profile.privacy.description":
+      "Download a JSON copy of your profile, listings, trades, and messages. You can close your account to anonymize profile fields and deactivate active listings.",
+    "profile.privacy.export": "Export my data",
+    "profile.privacy.exporting": "Preparing export…",
+    "profile.privacy.exportSuccess": "Export downloaded",
+    "profile.privacy.exportFailed": "Export failed — try again",
+    "profile.privacy.deleteTitle": "Close account",
+    "profile.privacy.deleteHint":
+      "This anonymizes your username, bio, and payment methods. Active listings are deactivated. Type DELETE to confirm. Open trades must be finished first.",
+    "profile.privacy.deletePlaceholder": "Type DELETE",
+    "profile.privacy.delete": "Close account",
+    "profile.privacy.deleting": "Closing…",
+    "profile.privacy.deleteSuccess": "Account closed",
+    "profile.privacy.deleteFailed": "Could not close account",
+    "profile.privacy.closedNotice":
+      "This account is closed. Profile fields were anonymized per our privacy policy.",
     "listings.inactiveBadge": "Inactive",
 
     // Trade flow — manual confirmation steps (TASK-006)
     "trade.step.initiated": "Trade initiated",
+    "trade.step.sellerHandshake": "Seller confirmation (24h)",
     "trade.step.awaitingPayment": "Awaiting payment",
     "trade.step.buyerConfirmed": "Buyer confirmed payment sent",
     "trade.step.awaitingSeller": "Awaiting seller confirmation",
     "trade.step.sellerConfirmed": "Seller confirmed payment received",
     "trade.step.complete": "Trade complete",
     "trade.action.buyerSent": "I have sent the payment",
+    "trade.action.confirmHandshake": "Confirm trade request",
+    "trade.action.declineHandshake": "Decline request",
+    "trade.handshake.sellerPrompt":
+      "The buyer wants to purchase this listing. Confirm within 24 hours or the request auto-cancels with a full refund for the buyer.",
+    "trade.handshake.buyerWaiting":
+      "Waiting for the seller to confirm this purchase request. Your funds are not locked yet.",
+    "trade.handshake.deadline": "Respond by {deadline}",
+    "trade.handshake.noPaymentYet":
+      "Payment steps unlock after the seller confirms.",
     "trade.action.sellerReceived": "I have received the payment",
     "trade.hint.sendOffChain":
       "Send the stablecoin to the seller's address outside the app, then click the button below.",
@@ -1236,8 +1489,42 @@ const translations = {
       "Buyer taps “I have sent the payment”; seller checks their wallet and confirms receipt.",
     "trade.paymentPhase.step3":
       "Optional: paste a transaction hash after sending to run an on-chain check (does not move funds on the platform).",
+    "trade.sellerPayment.title": "Seller payment address",
+    "trade.sellerPayment.empty":
+      "The seller has not added a wallet for this token yet. Ask them in chat before sending funds.",
+    "trade.sellerPayment.copy": "Copy address",
+    "trade.sellerPayment.copied": "Address copied",
     "trade.tab.progress": "Trade",
     "trade.cancel": "Cancel trade",
+    "trade.buyerCancel.beforeShip": "Cancel before shipment",
+    "trade.buyerCancel.confirmTitle": "Cancel this trade before shipment?",
+    "trade.buyerCancel.confirmBody":
+      "Per platform rules, funds are split: 85% back to you, 10% seller compensation, 5% platform fee. This cannot be undone.",
+    "trade.buyerCancel.buyerLine": "You receive: {amount}",
+    "trade.buyerCancel.sellerLine": "Seller compensation: {amount}",
+    "trade.buyerCancel.platformLine": "Platform fee: {amount}",
+    "trade.buyerCancel.confirmAction": "Confirm cancellation",
+    "trade.buyerCancel.success": "Trade cancelled — refund split applied",
+    "trade.status.cancelled_buyer_pre_ship":
+      "Cancelled by buyer (pre-shipment)",
+    "trade.onChain.title": "On-chain escrow (ICRC)",
+    "trade.onChain.lockedBody":
+      "Funds are locked in the marketplace canister via ICRC-2. The seller receives tokens only after you confirm delivery or the release rules apply.",
+    "trade.onChain.buyerPending":
+      "Complete purchase from the listing page to approve ICRC-2 spend and lock funds.",
+    "trade.onChain.sellerPending":
+      "Waiting for the buyer to lock ckUSDC/ckUSDT in on-chain escrow.",
+    "trade.onChain.lockedBadge": "Escrow locked on ICP ledger",
+    "trade.onChain.released": "Escrow released to seller (minus platform fee)",
+    "trade.onChain.sellerReleaseHint":
+      "Confirm only after delivery. This releases locked tokens to your wallet on-chain.",
+    "trade.onChain.actionRelease": "Confirm delivery & release escrow",
+    "trade.onChain.createCkIntent": "Create ck PaymentIntent (on-chain path)",
+    "trade.onChain.lockFunds": "Approve & lock in trustless escrow",
+    "trade.onChain.lockHint":
+      "ICRC-2 approve then lock — funds stay in canister escrow until release.",
+    "trade.manual.secondaryNotice":
+      "Manual wallet-to-wallet path — the platform does not hold these tokens on-chain.",
 
     // Dispute modal i18n (TASK-006)
     "dispute.reason.itemNotReceived": "Item not received",
@@ -1250,6 +1537,27 @@ const translations = {
     "dispute.form.title": "Open a Dispute",
     "dispute.form.reason": "Reason",
     "dispute.form.description": "Description",
+    "dispute.form.submit": "Submit dispute",
+    "dispute.playbook.physicalHint":
+      "Physical disputes require TTN screenshot, at least 2 package photos, and chat export link. L1 mediation SLA: 24h.",
+    "dispute.playbook.digitalHint":
+      "Digital disputes require file hash and download timestamp. L1 mediation SLA: 6h.",
+    "dispute.playbook.digitalInspectionNote":
+      "Download timestamp is taken from your delivery record; redownload does not extend inspection.",
+    "dispute.evidence.ttn": "TTN screenshot",
+    "dispute.evidence.uploadTtn": "Upload TTN screenshot",
+    "dispute.evidence.chatLink": "Chat export link",
+    "dispute.evidence.packagePhotos": "Package photos",
+    "dispute.evidence.fileHash": "File hash",
+    "dispute.evidence.dropHint": "Drop package photos here or click to select",
+    "dispute.evidence.maxFiles": "Maximum evidence files reached",
+    "dispute.validation.descriptionMin":
+      "Description must be at least 20 characters",
+    "dispute.validation.ttnRequired": "TTN screenshot is required",
+    "dispute.validation.photosMin": "At least 2 package photos are required",
+    "dispute.validation.chatLinkRequired": "Chat export link is required",
+    "dispute.validation.hashRequired": "File hash is required",
+    "dispute.validation.downloadTsRequired": "Download timestamp is required",
 
     // TASK-007: Trade detail UX hardening
     "trade.dispute.chatBanner":
@@ -1345,7 +1653,7 @@ const translations = {
     "nav.badge_unread_messages": "непрочитані повідомлення",
 
     // Hero
-    "hero.badge": "Крипто-оголошення — як OLX, оплата в стейблкоїнах",
+    "hero.badge": "Крипто-оголошення — оплата в стейблкоїнах",
     "hero.title": "Купуй і продавай речі за крипто —",
     "hero.titleHighlight": "Без кроку через фіат",
     "hero.subtitle":
@@ -1355,7 +1663,7 @@ const translations = {
     "hero.welcomeBack": "З поверненням",
 
     // Listings
-    "home.categories.title": "Категорії OLX",
+    "home.categories.title": "Переглянути за категоріями",
     "home.categories.all": "Усі оголошення",
 
     "listings.featured": "Вибрані оголошення",
@@ -1405,9 +1713,30 @@ const translations = {
 
     // Trade statuses
     "trade.status.pending": "Угоду розпочато",
+    "trade.status.awaiting_seller_handshake": "Очікує підтвердження продавця",
+    "trade.status.payment_intent": "Готово до оплати",
+    "trade.status.manual_payment_pending": "Очікує підтвердження оплати",
+    "trade.status.payment_intent_expired": "Термін оплати минув",
+    "trade.action.createPaymentIntent": "Відкрити оплату для покупця",
+    "trade.paymentIntent.title": "Інструкції з оплати",
+    "trade.paymentIntent.amount": "Сума до переказу",
+    "trade.paymentIntent.recipient": "Адреса отримувача",
+    "trade.paymentIntent.expiry": "Сплатити до",
+    "trade.paymentIntent.gasWarning": "Висока комісія мережі Ethereum.",
+    "trade.paymentIntent.coordinatedNote":
+      "Координований розрахунок — не trustless escrow. Надсилайте точний токен лише в мережі Ethereum ERC20.",
+    "trade.paymentPath.manualTitle": "Ручний координований платіж",
+    "trade.paymentPath.mutuallyExclusive":
+      "Ручний ERC20 і trustless escrow ckUSDC/ckUSDT взаємовиключні — ця угода використовує ручний розрахунок.",
+    "trade.status.cancelled_no_seller_response":
+      "Скасовано — продавець не відповів",
     "trade.status.funded": "Очікування оплати",
     "trade.status.buyer_confirmed": "Очікування підтвердження продавця",
     "trade.status.payment_verified": "Оплату підтверджено — завершуємо",
+    "trade.status.digital_delivered": "Файл доставлено — 24 год на перевірку",
+    "trade.status.fulfillment_pending": "Готово до відправки",
+    "trade.status.shipped": "Відправлено",
+    "trade.status.awaiting_receipt": "Очікує отримання",
     "trade.status.complete": "Угоду завершено",
     "trade.status.refunded": "Повернено",
     "trade.status.disputed": "Під диспутом",
@@ -1476,6 +1805,20 @@ const translations = {
     "create.photoUrlsMissing":
       "Завантаження фото не завершено — видаліть і додайте фото знову",
     "create.submitFailed": "Не вдалося опублікувати оголошення",
+    "create.stake.title": "Стейк продавця",
+    "create.stake.required": "Потрібний стейк (5%, мін. 10 USDT)",
+    "create.stake.available": "Ваш баланс стейку",
+    "create.stake.locked": "Заблоковано на оголошеннях",
+    "create.stake.depositHint":
+      "Поповніть стейк-баланс на платформі перед публікацією (внутрішній ledger — не on-chain застава до наступної фази). Кошти залишаються заблокованими до завершення claim period після успішного продажу.",
+    "create.stake.depositBtn": "Внести потрібний стейк",
+    "create.stake.depositing": "Внесення…",
+    "create.stake.depositOk": "Стейк внесено",
+    "create.stake.insufficient":
+      "Недостатньо стейку. Внесіть щонайменше потрібну суму — оголошення залишиться чернеткою, доки стейк не заблоковано.",
+    "create.stake.draftSaved": "Оголошення збережено як чернетку",
+    "create.stake.rule":
+      "max(5% від ціни, 10 USDT) блокується перед публікацією",
     "create.updateFailed": "Не вдалося оновити оголошення",
     "create.error.noProfile":
       "Спочатку створіть профіль перед публікацією оголошення",
@@ -1527,7 +1870,9 @@ const translations = {
     "create.validation.category": "Виберіть категорію",
     "create.validation.condition": "Виберіть стан",
     "create.validation.description": "Додайте опис",
-    "create.validation.digitalUrl": "URL цифрового файлу обов'язковий",
+    "create.field.digitalFile": "Цифровий файл",
+    "create.validation.digitalFile":
+      "Завантажте файл (pdf, zip, png, jpg, epub, mp4 — max 500MB)",
     "create.validation.price": "Вкажіть коректну ціну",
     "create.validation.location": "Вкажіть місцезнаходження",
     "create.validation.carrier": "Виберіть перевізника",
@@ -1561,6 +1906,38 @@ const translations = {
     "detail.signInToBuy": "Увійти для покупки",
     "detail.selectShippingAndBuy": "Обрати доставку та купити",
     "detail.proceedCheckout": "Перейти до оформлення",
+    "detail.checkout.title": "Перевірте перед покупкою",
+    "detail.checkout.itemPrice": "Ціна товару",
+    "detail.checkout.platformFee": "Комісія платформи ({percent})",
+    "detail.checkout.network": "Мережа оплати",
+    "detail.checkout.delivery": "Доставка",
+    "detail.checkout.total": "Разом до сплати",
+    "detail.checkout.fundsNotLocked":
+      "Ваші кошти ще не заблоковано. Кроки оплати відкриються після згоди продавця.",
+    "detail.checkout.defaultFeeNote":
+      "Застосовується стандартна ставка платформи (3%).",
+    "detail.checkout.manualNote":
+      "Фаза 1 — платформо-координований ручний розрахунок, не trustless on-chain escrow для цього токена.",
+    "detail.checkout.confirm": "Підтвердити та розпочати угоду",
+    "detail.checkout.loading": "Завантаження розбивки комісії…",
+    "detail.checkout.unavailable":
+      "Розбивку комісії недоступно — використовується стандартна оцінка 3%.",
+    "detail.tradeCap.title": "Beta-ліміти угоди",
+    "detail.tradeCap.standard": "Стандартні beta-правила (до 500 USDT).",
+    "detail.tradeCap.elevated":
+      "Підвищений рівень (500–1000 USDT): потрібен verified tier продавця або stake оголошення ≥10% (мін. 50 USDT).",
+    "detail.tradeCap.elevatedVerifiedOk": "Продавець має verified tier.",
+    "detail.tradeCap.elevatedStakeOk":
+      "Stake оголошення відповідає підвищеним вимогам.",
+    "detail.tradeCap.elevatedStakeMissing":
+      "Потрібен verified tier або вищий stake оголошення.",
+    "detail.tradeCap.highValueCk":
+      "Висока сума (>1000 USDT): лише ckUSDC/ckUSDT з Gate C trustless escrow — ручний розрахунок недоступний.",
+    "detail.tradeCap.gateCOff":
+      "Gate C вимкнено — високовартісні ck-угоди недоступні.",
+    "detail.tradeCap.rejected": "Поза лімітом beta (макс. 5000 USDT).",
+    "detail.tradeCap.blocked":
+      "Угоду не можна розпочати через поточні beta-ліміти.",
     // TODO: rename key when backend contract changes
     "detail.escrowNote":
       "Обидві сторони погодилися з умовами угоди. Виконайте ваші кроки вище.",
@@ -1573,9 +1950,23 @@ const translations = {
     "detail.removing": "Видалення…",
     "detail.notFound": "Оголошення не знайдено",
     "detail.notFoundDesc": "Це оголошення могло бути видалено або не існує.",
+    "detail.loadError":
+      "Не вдалося завантажити оголошення. Перевірте з'єднання та спробуйте ще раз.",
+    "detail.retry": "Спробувати знову",
+    "detail.buyError": "Не вдалося розпочати угоду. Спробуйте ще раз.",
+    "detail.startingTrade": "Розпочинаємо угоду…",
     "detail.browseListings": "Переглянути оголошення",
     "detail.shareLink": "Поділитися",
+    "detail.shareVia": "Поділитися через",
+    "detail.share.telegram": "Telegram",
+    "detail.share.whatsapp": "WhatsApp",
+    "detail.share.viber": "Viber",
+    "detail.share.facebook": "Facebook",
+    "detail.share.x": "X (Twitter)",
+    "detail.share.email": "Email",
+    "detail.share.copyLink": "Копіювати посилання",
     "detail.linkCopied": "Посилання скопійовано",
+    "detail.shareError": "Не вдалося відкрити варіанти поширення",
     "detail.reportListing": "Скарга",
     "detail.reportTitle": "Поскаржитися на оголошення",
     "detail.reportDesc":
@@ -1587,6 +1978,8 @@ const translations = {
     "detail.signInToReport": "Увійдіть, щоб поскаржитися",
     "detail.onChainEscrowBeta":
       "Ончейн-ескроу (ckUSDC/ckUSDT) у бета — див. Як працюють платежі.",
+    "detail.onChainEscrowPrimary":
+      "Trustless escrow: при покупці ckUSDC/ckUSDT блокуються в каністрі маркетплейсу on-chain.",
     "privacy.title": "Приватність і псевдоанонімність",
     "privacy.backHome": "На головну",
     "privacy.intro":
@@ -1595,7 +1988,8 @@ const translations = {
     "privacy.pseudonymousBody":
       "У публічному профілі — лише нік і репутація, не реальна особа. Інші не бачать повний principal ID на вашому профілі.",
     "privacy.weStoreTitle": "Що зберігається в каністрі",
-    "privacy.weStore1": "Нік, аватар, оголошення, угоди та повідомлення, прив’язані до II",
+    "privacy.weStore1":
+      "Нік, аватар, оголошення, угоди та повідомлення, прив’язані до II",
     "privacy.weStore2": "Історія угод і спорів для правил платформи",
     "privacy.weStore3": "Адреси для отримання крипто, які ви додаєте самі",
     "privacy.weDoNotTitle": "Чого ми не робимо",
@@ -1711,7 +2105,7 @@ const translations = {
     // Footer
     "paymentsGuide.title": "Як працюють платежі",
     "paymentsGuide.intro":
-      "CryptoMarket — маркетплейс товарів у стилі OLX. Стейблкоїни рухаються гаманець-на-гаманець; платформа координує стан угоди та спори — у Фазі 1 не утримує ваші кошти.",
+      "CryptoMarket — P2P-маркетплейс товарів. Стейблкоїни рухаються гаманець-на-гаманець; платформа координує стан угоди та спори — у Фазі 1 не утримує ваші кошти.",
     "paymentsGuide.honestyBanner":
       "Ми не називаємо Фазу 1 «trustless escrow». Кошти не блокуються на платформі в блокчейні, доки не з’явиться наступна фаза.",
     "paymentsGuide.backHome": "На головну",
@@ -1730,14 +2124,53 @@ const translations = {
     "paymentsGuide.phase2.title": "Фаза 2 — надійніша перевірка",
     "paymentsGuide.phase2.body":
       "Перевірки через експлорери та повторні спроби підвищують впевненість, що сума дійшла на адресу продавця.",
-    "paymentsGuide.phase2.item1": "Підтримка: USDT (TRC20, BEP20, ERC20) та USDC (ERC20).",
+    "paymentsGuide.phase2.item1":
+      "Підтримка: USDT (TRC20, BEP20, ERC20) та USDC (ERC20).",
     "paymentsGuide.phase2.item2":
       "Якщо перевірка не вдалась — угоду все одно можна завершити вручну.",
-    "paymentsGuide.phase3.title": "Фаза 3 — розрахунок у блокчейні (заплановано)",
+    "paymentsGuide.phase3.title":
+      "Фаза 3 — розрахунок у блокчейні (заплановано)",
     "paymentsGuide.phase3.body":
       "Майбутні релізи можуть блокувати кошти за правилами протоколу. Маркетинг оновимо лише після запуску.",
     "paymentsGuide.phase3.item1":
       "Без обіцянок «atomic swap» чи «trustless escrow» до запуску Фази 3.",
+    "insurance.section.title":
+      "Захист покупця — обмежений резерв (не повна гарантія)",
+    "insurance.section.body":
+      "Окремий ledger страхового резерву накопичує 40% платформних комісій. Виплати — останній засіб, суворо обмежені, з подвійним admin-approve — ніколи не позиціонуються як необмежене відшкодування.",
+    "insurance.section.item1":
+      "Угоди понад 500 USDT: лише stake продавця — страховий шлях недоступний.",
+    "insurance.section.item2":
+      "Коли резерв порожній — чесний copy: без гарантії повного відшкодування.",
+    "insurance.section.item3":
+      "Коли резерв є: виплата = min(збиток, 20% ліквідного фонду, 100 USDT/день, 500 USDT/угода).",
+    "insurance.protection.stake_only.title": "Лише stake",
+    "insurance.protection.stake_only.body":
+      "Сума угоди перевищує beta-ліміт 500 USDT для страхування. Захист обмежений stake оголошення продавця — не резервом.",
+    "insurance.protection.no_guarantee.title":
+      "Без гарантії повного відшкодування",
+    "insurance.protection.no_guarantee.body":
+      "Страховий резерв зараз порожній. Ми не обіцяємо повне відшкодування — лише конфіскація stake та обмеження акаунта продавця.",
+    "insurance.protection.capped_reserve.title":
+      "Обмежений резерв (останній засіб)",
+    "insurance.protection.capped_reserve.body":
+      "Обмежений резерв може частково покрити збитки після stake — це не необмежена гарантія. Ліміти: 500 USDT/угода, 100 USDT/день, макс. 20% ліквідного фонду.",
+    "waterfall.settlement.manual_restriction_only.title":
+      "Manual settlement — без custodial recovery",
+    "waterfall.settlement.manual_restriction_only.body":
+      "Угода використовувала координований off-chain платіж. Платформа не може повернути кошти покупця з custody — лише конфіскація stake оголошення та обмеження акаунта продавця до погашення боргу.",
+    "waterfall.settlement.partial_recovery.title":
+      "Лише часткове відшкодування",
+    "waterfall.settlement.partial_recovery.body":
+      "Можливе часткове відшкодування зі stake продавця та/або обмеженого страхового резерву. Решта фіксується як заборгованість продавця з обмеженням акаунта — без обіцянки повного refund.",
+    "waterfall.settlement.on_chain_recovery.title":
+      "On-chain refund + відповідальність продавця",
+    "waterfall.settlement.on_chain_recovery.body":
+      "Заблоковані ck-кошти повертаються покупцю on-chain. Stake продавця конфісковано першим; залишок боргу відстежується з обмеженням акаунта.",
+    "waterfall.settlement.on_chain_refund_note":
+      "On-chain refund escrow покупцю обробляється окремо від кроків stake та страхування.",
+    "waterfall.settlement.residual_note":
+      "Непогашена заборгованість продавця може блокувати нові оголошення та угоди.",
     "footer.builtWith": "Зроблено з любов'ю за допомогою",
 
     // Common
@@ -1768,6 +2201,11 @@ const translations = {
     "filter.any": "Будь-яке",
 
     // Trades page
+    "trade.loadError":
+      "Не вдалося завантажити угоду. Перевірте з'єднання та спробуйте ще раз.",
+    "trade.notFound": "Угоду не знайдено",
+    "trades.loadError":
+      "Не вдалося завантажити угоди. Перевірте з'єднання та спробуйте ще раз.",
     "trades.title": "Мої угоди",
     "trades.subtitle": "Відстежуйте всі активні та завершені угоди",
     "trades.tab.buying": "Купую",
@@ -1783,6 +2221,18 @@ const translations = {
     "search.placeholder": "Пошук оголошень…",
     "search.ariaLabel": "Пошук оголошень",
     "search.clearAriaLabel": "Очистити пошук",
+
+    // Saved searches
+    "savedSearch.title": "Збережені пошуки",
+    "savedSearch.saveCurrent": "Зберегти поточні фільтри",
+    "savedSearch.namePlaceholder": "напр. Київ електроніка",
+    "savedSearch.saveButton": "Зберегти",
+    "savedSearch.saved": "Пошук збережено",
+    "savedSearch.saveError": "Не вдалося зберегти пошук",
+    "savedSearch.empty": "Ще немає збережених пошуків.",
+    "savedSearch.delete": "Видалити збережений пошук",
+    "savedSearch.alertsLabel": "Сповіщення про нові оголошення",
+    "savedSearch.alertToggleError": "Не вдалося оновити сповіщення",
 
     // Payment Verification Widget
     "verify.title": "Верифікація платежу в блокчейні",
@@ -1861,6 +2311,13 @@ const translations = {
     "escrow.terminal.refunded.desc": "Оплату повернено покупцю",
     "escrow.terminal.cancelled.label": "Скасовано",
     "escrow.terminal.cancelled.desc": "Угоду скасовано за взаємною згодою",
+    "escrow.terminal.cancelled_no_seller_response.label":
+      "Продавець не відповів",
+    "escrow.terminal.cancelled_no_seller_response.desc":
+      "24-годинне вікно підтвердження минуло або продавець відхилив запит. Ви отримуєте повне повернення — кошти не блокувалися.",
+    "escrow.terminal.cancelled_buyer_pre_ship.label": "Скасовано покупцем",
+    "escrow.terminal.cancelled_buyer_pre_ship.desc":
+      "Ви скасували до відправки. Розподіл: 85% покупцю, 10% продавцю, 5% платформі.",
 
     // Chat
     "chat.title": "Чат",
@@ -1889,7 +2346,12 @@ const translations = {
     "reputation.averageRating": "Середній рейтинг",
     "reputation.trustLevel": "Рівень довіри",
     "reputation.disputeRate": "Рівень диспутів",
+    "reputation.buyerScore": "Рейтинг покупця",
+    "reputation.sellerScore": "Рейтинг продавця",
     "reputation.ratingAriaLabel": "{value} з 5 зірок",
+    "create.categoryAttributes.title": "Деталі категорії",
+    "create.validation.requiredAttribute":
+      "Це поле обов'язкове для обраної категорії",
 
     // Admin — Phase 2 metrics (Ukrainian)
     "admin.metrics.title": "Метрики платформи",
@@ -1958,6 +2420,7 @@ const translations = {
     "admin.tab.overview": "Огляд",
     "admin.tab.users": "Користувачі",
     "admin.tab.disputes": "Диспути",
+    "admin.tab.liabilities": "Заборгованість",
     "admin.tab.listings": "Оголошення",
     "admin.tab.audit": "Журнал аудиту",
     "admin.tab.settings": "Налаштування",
@@ -1972,6 +2435,27 @@ const translations = {
     "admin.listings.colActions": "Дії",
     "admin.listings.remove": "Видалити",
     "admin.listings.removing": "Видалення…",
+    "admin.listings.promoteTitle": "Підвищити оголошення (VIP)",
+    "admin.listings.promoteHint":
+      "Введіть ID оголошення для підвищення в результатах пошуку.",
+    "admin.listings.promotePlaceholder": "ID оголошення",
+    "admin.listings.promote": "Підвищити",
+    "admin.listings.promoting": "Підвищення…",
+    "admin.listings.promoteSuccess": "Оголошення підвищено",
+    "admin.liability.title": "Черга глобальної заборгованості",
+    "admin.liability.empty": "Немає відкритих записів заборгованості.",
+    "admin.liability.col.id": "ID",
+    "admin.liability.col.user": "Користувач",
+    "admin.liability.col.remaining": "Залишок",
+    "admin.liability.col.reason": "Причина",
+    "admin.liability.col.status": "Статус",
+    "admin.liability.col.age": "Вік",
+    "admin.liability.col.partialClear": "Часткове погашення",
+    "admin.liability.amountPlaceholder": "Сума в центах",
+    "admin.liability.notePlaceholder": "Примітка для аудиту",
+    "admin.liability.partialClear.action": "Застосувати часткове погашення",
+    "admin.liability.partialClear.success": "Часткове погашення застосовано",
+    "admin.liability.partialClear.invalid": "Вкажіть суму (центи) та примітку",
     "admin.signInDesc":
       "Увійдіть через Internet Identity для доступу до адмін панелі.",
     "admin.signIn": "Увійти через Internet Identity",
@@ -1985,6 +2469,7 @@ const translations = {
     "admin.users.col.trust": "Довіра",
     "admin.users.col.status": "Статус",
     "admin.users.col.score": "Рейтинг",
+    "admin.users.col.kyc": "KYC",
     "admin.users.col.registered": "Зареєстрований",
     "admin.users.col.actions": "Дії",
     "admin.users.status.active": "Активний",
@@ -2012,6 +2497,39 @@ const translations = {
     "admin.users.suspendFailed": "Не вдалося призупинити",
     "admin.users.promoted": "Користувача підвищено до модератора",
     "admin.users.promoteFailed": "Не вдалося підвищити",
+    "admin.users.action.verifyKyc": "Надати verified tier",
+    "admin.users.action.revokeKyc": "Зняти verified tier",
+    "admin.users.kycUpdated": "KYC tier оновлено",
+    "admin.users.kycUpdateFailed": "Не вдалося оновити KYC tier",
+
+    "admin.trustlessEscrow.title": "On-chain escrow (Gate C)",
+    "admin.trustlessEscrow.hint":
+      "Коли вимкнено, initiateOnChainTrade відхиляється і публічного CTA немає. Увімкніть лише після testnet E2E та sign-off власника.",
+    "admin.trustlessEscrow.enable": "Дозволити ICRC-2 fund lock API",
+    "admin.trustlessEscrow.gateCWarning":
+      "Увімкнено — переконайтесь, що Gate C checklist виконано перед маркетингом on-chain escrow.",
+    "admin.trustlessEscrow.disabled":
+      "On-chain escrow вимкнено — in-flight ck угоди можуть завершитись",
+    "admin.trustlessEscrow.checklistTitle":
+      "Security checklist (обовʼязково перед enable)",
+    "admin.trustlessEscrow.checklist.testnetE2e": "Testnet ckUSDC E2E пройдено",
+    "admin.trustlessEscrow.checklist.rollbackTests":
+      "ICRC rollback тести green",
+    "admin.trustlessEscrow.checklist.subaccountDesign":
+      "Escrow subaccount design перевірено",
+    "admin.trustlessEscrow.checklist.betaCaps":
+      "Beta cap (500 USDT) налаштовано",
+    "admin.trustlessEscrow.betaCapLabel": "ck beta cap",
+    "admin.trustlessEscrow.signOffRef": "Security sign-off reference",
+    "admin.trustlessEscrow.signOffPlaceholder":
+      "напр. SEC-2026-001 або URL документа",
+    "admin.trustlessEscrow.checklistIncomplete":
+      "Завершіть checklist і вкажіть sign-off перед увімкненням Gate C.",
+    "admin.trustlessEscrow.saved": "Прапорець on-chain escrow збережено",
+    "admin.trustlessEscrow.saveFailed": "Не вдалося зберегти прапорець",
+    "admin.trustlessEscrow.refresh": "Оновити",
+
+    "profile.kyc.verified": "Verified продавець",
 
     // Sidebar
     "sidebar.toggle": "Перемкнути бічну панель",
@@ -2103,6 +2621,7 @@ const translations = {
     "header.balance.loading": "Завантаження…",
     "header.balance.error": "Недоступно",
     "header.balance.refreshing": "Оновлення…",
+    "header.balance.refresh": "Оновити баланс",
 
     // governance.* namespace (Phase 3)
     "governance.pageTitle": "Управління",
@@ -2373,6 +2892,8 @@ const translations = {
       "Порівняйте цей хеш із завантаженим файлом для перевірки його цілісності.",
     "digital.delivery.inspectionCountdown":
       "У вас є {hours} год {minutes} хв, щоб відкрити диспут, якщо файл неправильний.",
+    "digital.delivery.inspectionRedownloadNote":
+      "Після завантаження у вас 24 год на перевірку. Повторне завантаження не продовжує термін.",
     "digital.delivery.inspectionExpired":
       "Термін перевірки минув. Кошти передані продавцю.",
 
@@ -2428,6 +2949,21 @@ const translations = {
     "payment.save": "Зберегти адресу",
     "payment.saved": "Адресу збережено!",
     "payment.savedMethods": "Збережені способи оплати",
+    "walletLink.connectWithProof": "Підключити гаманець із підписом",
+    "walletLink.signing": "Очікуємо підпис у гаманці…",
+    "walletLink.linked": "Гаманець прив’язано з nonce-доказом.",
+    "walletLink.linkFailed":
+      "Не вдалося прив’язати гаманець — перевірте підпис.",
+    "walletLink.challengeFailed": "Не вдалося отримати nonce від backend.",
+    "walletLink.unsupportedToken":
+      "Підписане підключення для цього токена ще недоступне.",
+    "walletLink.antiphishing":
+      "Підпишіть повідомлення платформи у гаманці, щоб підтвердити контроль над адресою. CryptoMarket ніколи не просить seed phrase.",
+    "walletLink.profileTitle": "Прив’язані зовнішні гаманці",
+    "walletLink.profileEmpty": "Ще немає гаманців із підписаним доказом.",
+    "walletLink.addWallet": "Прив’язати гаманець",
+    "walletLink.unlinked": "Гаманець відв’язано.",
+    "walletLink.unlinkFailed": "Не вдалося відв’язати гаманець.",
     "payment.noMethods": "Способи оплати ще не додано.",
     "payment.remove": "Видалити",
     "payment.scanQR": "Сканувати QR",
@@ -2487,6 +3023,7 @@ const translations = {
 
     // Toast actions
     "toast.view_trade": "Перейти до угоди",
+    "toast.view_listing": "Переглянути оголошення",
 
     // Notifications
     "notification.trade_funded":
@@ -2505,6 +3042,8 @@ const translations = {
       "Угода профінансована 48 год тому. Перевірте платіж.",
     "notification.deadline_jury_12h":
       "До дедлайну журі в угоді залишилось менше 12 годин.",
+    "notification.saved_search_match":
+      "Нове оголошення відповідає вашому збереженому пошуку",
 
     // Profile public view
     "profile.notFound.title": "Продавця не знайдено",
@@ -2527,16 +3066,43 @@ const translations = {
     "detail.inactiveBanner": "Це оголошення неактивне",
     "profile.tabs.active": "Активні",
     "profile.tabs.inactive": "Неактивні",
+    "profile.privacy.title": "Приватність і дані",
+    "profile.privacy.description":
+      "Завантажте JSON-копію профілю, оголошень, угод і повідомлень. Закриття акаунта анонімізує профіль і деактивує активні оголошення.",
+    "profile.privacy.export": "Експорт моїх даних",
+    "profile.privacy.exporting": "Готуємо експорт…",
+    "profile.privacy.exportSuccess": "Експорт завантажено",
+    "profile.privacy.exportFailed": "Не вдалося експортувати — спробуйте ще",
+    "profile.privacy.deleteTitle": "Закрити акаунт",
+    "profile.privacy.deleteHint":
+      "Ім'я, біо та платіжні методи будуть анонімізовані. Активні оголошення деактивуються. Введіть DELETE для підтвердження. Спочатку завершіть відкриті угоди.",
+    "profile.privacy.deletePlaceholder": "Введіть DELETE",
+    "profile.privacy.delete": "Закрити акаунт",
+    "profile.privacy.deleting": "Закриваємо…",
+    "profile.privacy.deleteSuccess": "Акаунт закрито",
+    "profile.privacy.deleteFailed": "Не вдалося закрити акаунт",
+    "profile.privacy.closedNotice":
+      "Акаунт закрито. Поля профілю анонімізовано згідно з політикою приватності.",
     "listings.inactiveBadge": "Неактивне",
 
     // Trade flow — manual confirmation steps (TASK-006)
     "trade.step.initiated": "Угоду розпочато",
+    "trade.step.sellerHandshake": "Підтвердження продавцем (24 год)",
     "trade.step.awaitingPayment": "Очікування оплати",
     "trade.step.buyerConfirmed": "Покупець підтвердив відправку оплати",
     "trade.step.awaitingSeller": "Очікування підтвердження продавця",
     "trade.step.sellerConfirmed": "Продавець підтвердив отримання оплати",
     "trade.step.complete": "Угоду завершено",
     "trade.action.buyerSent": "Я відправив оплату",
+    "trade.action.confirmHandshake": "Підтвердити запит на угоду",
+    "trade.action.declineHandshake": "Відхилити запит",
+    "trade.handshake.sellerPrompt":
+      "Покупець хоче придбати це оголошення. Підтвердіть протягом 24 годин, інакше запит автоматично скасується з повним поверненням для покупця.",
+    "trade.handshake.buyerWaiting":
+      "Очікуємо підтвердження продавця. Ваші кошти ще не заблоковані.",
+    "trade.handshake.deadline": "Відповісти до {deadline}",
+    "trade.handshake.noPaymentYet":
+      "Кроки оплати відкриються після підтвердження продавцем.",
     "trade.action.sellerReceived": "Я отримав оплату",
     "trade.hint.sendOffChain":
       "Відправте стейблкоїн на адресу продавця поза додатком, потім натисніть кнопку нижче.",
@@ -2551,8 +3117,44 @@ const translations = {
       "Покупець натискає «Я відправив оплату»; продавець перевіряє гаманець і підтверджує отримання.",
     "trade.paymentPhase.step3":
       "За бажанням: після відправки вставте хеш транзакції для перевірки в блокчейні (кошти на платформі не рухаються).",
+    "trade.sellerPayment.title": "Адреса продавця для оплати",
+    "trade.sellerPayment.empty":
+      "Продавець ще не додав гаманець для цього токена. Уточніть у чаті перед відправленням.",
+    "trade.sellerPayment.copy": "Скопіювати адресу",
+    "trade.sellerPayment.copied": "Адресу скопійовано",
     "trade.tab.progress": "Угода",
     "trade.cancel": "Скасувати угоду",
+    "trade.buyerCancel.beforeShip": "Скасувати до відправки",
+    "trade.buyerCancel.confirmTitle": "Скасувати угоду до відправки?",
+    "trade.buyerCancel.confirmBody":
+      "За правилами платформи кошти розподіляються: 85% вам, 10% компенсація продавцю, 5% комісія платформи. Цю дію не можна скасувати.",
+    "trade.buyerCancel.buyerLine": "Ви отримуєте: {amount}",
+    "trade.buyerCancel.sellerLine": "Компенсація продавцю: {amount}",
+    "trade.buyerCancel.platformLine": "Комісія платформи: {amount}",
+    "trade.buyerCancel.confirmAction": "Підтвердити скасування",
+    "trade.buyerCancel.success":
+      "Угоду скасовано — застосовано розподіл повернення",
+    "trade.status.cancelled_buyer_pre_ship":
+      "Скасовано покупцем (до відправки)",
+    "trade.onChain.title": "On-chain escrow (ICRC)",
+    "trade.onChain.lockedBody":
+      "Кошти заблоковані в каністрі маркетплейсу через ICRC-2. Продавець отримає токени лише після підтвердження доставки або за правилами release.",
+    "trade.onChain.buyerPending":
+      "Завершіть покупку на сторінці оголошення — approve ICRC-2 і lock коштів.",
+    "trade.onChain.sellerPending":
+      "Очікування lock ckUSDC/ckUSDT покупцем в on-chain escrow.",
+    "trade.onChain.lockedBadge": "Escrow заблоковано в ICP ledger",
+    "trade.onChain.released":
+      "Escrow передано продавцю (мінус комісія платформи)",
+    "trade.onChain.sellerReleaseHint":
+      "Підтверджуйте лише після доставки. Це release заблокованих токенів on-chain.",
+    "trade.onChain.actionRelease": "Підтвердити доставку та release escrow",
+    "trade.onChain.createCkIntent": "Створити ck PaymentIntent (on-chain path)",
+    "trade.onChain.lockFunds": "Approve & lock у trustless escrow",
+    "trade.onChain.lockHint":
+      "ICRC-2 approve → lock — кошти в canister escrow до release.",
+    "trade.manual.secondaryNotice":
+      "Ручний шлях гаманець-на-гаманець — платформа не утримує ці токени on-chain.",
 
     // Dispute modal i18n (TASK-006)
     "dispute.reason.itemNotReceived": "Товар не отримано",
@@ -2564,6 +3166,28 @@ const translations = {
     "dispute.form.title": "Відкрити диспут",
     "dispute.form.reason": "Причина",
     "dispute.form.description": "Опис",
+    "dispute.form.submit": "Подати спір",
+    "dispute.playbook.physicalHint":
+      "Для фізичних спорів потрібні скрін TTN, мінімум 2 фото посилки та посилання на чат. SLA L1: 24 год.",
+    "dispute.playbook.digitalHint":
+      "Для цифрових спорів потрібні хеш файлу та час завантаження. SLA L1: 6 год.",
+    "dispute.playbook.digitalInspectionNote":
+      "Час завантаження береться з запису доставки; повторне завантаження не продовжує перевірку.",
+    "dispute.evidence.ttn": "Скрін TTN",
+    "dispute.evidence.uploadTtn": "Завантажити скрін TTN",
+    "dispute.evidence.chatLink": "Посилання на експорт чату",
+    "dispute.evidence.packagePhotos": "Фото посилки",
+    "dispute.evidence.fileHash": "Хеш файлу",
+    "dispute.evidence.dropHint":
+      "Перетягніть фото посилки сюди або натисніть для вибору",
+    "dispute.evidence.maxFiles": "Досягнуто ліміт файлів доказів",
+    "dispute.validation.descriptionMin":
+      "Опис має містити щонайменше 20 символів",
+    "dispute.validation.ttnRequired": "Потрібен скрін TTN",
+    "dispute.validation.photosMin": "Потрібно щонайменше 2 фото посилки",
+    "dispute.validation.chatLinkRequired": "Потрібне посилання на експорт чату",
+    "dispute.validation.hashRequired": "Потрібен хеш файлу",
+    "dispute.validation.downloadTsRequired": "Потрібна мітка часу завантаження",
 
     // TASK-007: Trade detail UX hardening
     "trade.dispute.chatBanner":

@@ -1,4 +1,5 @@
 import type { MediaAttachment } from "@/backend.d";
+import { safeHttpUrl } from "@/utils/safeUrl";
 import { FileText, Paperclip } from "lucide-react";
 
 function formatFileSize(bytes: bigint): string {
@@ -20,10 +21,34 @@ interface MediaAttachmentCardProps {
   attachment: MediaAttachment;
 }
 
+function safeAttachmentHref(url: string): string | undefined {
+  return safeHttpUrl(url);
+}
+
 export function MediaAttachmentCard({ attachment }: MediaAttachmentCardProps) {
+  const href = safeAttachmentHref(attachment.url);
+  if (!href) {
+    return (
+      <div
+        className="flex items-center gap-2.5 p-2.5 rounded-lg border border-border bg-muted/40"
+        data-ocid="media-attachment-card"
+      >
+        <FileIcon fileName={attachment.fileName} />
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-medium text-foreground truncate">
+            {attachment.fileName}
+          </p>
+          <p className="text-[10px] text-muted-foreground">
+            {formatFileSize(attachment.fileSize)}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <a
-      href={attachment.url}
+      href={href}
       download={attachment.fileName}
       target="_blank"
       rel="noopener noreferrer"

@@ -9,6 +9,7 @@ import Admin "lib/Admin";
 import Obs "lib/Observability";
 import GovernanceLib "lib/Governance";
 import TreasuryLib "lib/Treasury";
+import InsuranceReserveLib "lib/InsuranceReserve";
 import PaymentsLib "lib/Payments";
 
 
@@ -26,12 +27,16 @@ import AdminMixin "mixins/admin-api";
 import ShippingMixin "mixins/shipping-api";
 import MessagingMixin "mixins/messaging-api";
 import GovernanceMixin "mixins/governance-api";
+import InsuranceMixin "mixins/insurance-api";
 import VaultMixin "mixins/vault-api";
 import VaultLib "lib/Vault";
 import VaultBalances "lib/VaultBalances";
-import ObjectStorageMixin "mixins/object-storage-api";
+import MixinObjectStorage "mo:caffeineai-object-storage/Mixin";
 import Migration "migration";
 import EngagementMixin "mixins/engagement-api";
+import WalletLink "lib/WalletLink";
+import StakeLib "lib/Stake";
+import StakeMixin "mixins/stake-api";
 
 
 
@@ -83,6 +88,8 @@ persistent actor self {
   let feedbacks         = Map.empty<Types.FeedbackId, Types.Feedback>();
   let userFeedbackIndex = Map.empty<Types.UserId, List.List<Types.FeedbackId>>();
   let nextFeedbackId    = { var value : Nat = 0 };
+  let liabilityRecords  = Map.empty<Nat, Types.LiabilityRecord>();
+  let nextLiabilityId   = { var value : Nat = 1 };
 
   // Disputes domain
   let disputes      = Map.empty<Types.DisputeId, Types.Dispute>();
@@ -93,6 +100,7 @@ persistent actor self {
   // Shipping domain
   let shippingCache    = Map.empty<Text, (Text, Types.Timestamp)>();
   let nextWaybillSeed  = { var value : Nat = 0 };
+  let trackingTimelines = Map.empty<Types.TradeId, [Types.TrackingTimelineEntry]>();
 
   // Messaging domain
   let messages      = Map.empty<Types.MessageId, Types.Message>();
@@ -128,6 +136,15 @@ persistent actor self {
     var avalancheApiKey     = "";
     var ckUsdcLedgerId      = "xevnm-gaaaa-aaaar-qafnq-cai";   // ICP mainnet ckUSDC ledger
     var ckUsdtLedgerId      = "cngnf-vqaaa-aaaar-qag4q-cai";   // ICP mainnet ckUSDT ledger
+    var trustlessEscrowEnabled = false;
+    var gateCTestnetE2ePassed = false;
+    var gateCRollbackTestsPassed = false;
+    var gateCSubaccountDesignReviewed = false;
+    var gateCBetaCapsConfigured = false;
+    var gateCSecuritySignOffRef = "";
+    var ckOnChainBetaCapUsdCents = 50_000; // 500 USDT (D-034)
+    var platformFeeBps         = 0;                  // 0 = unset → 3% default (D-001)
+    var stakeOnChainEnabled    = false;              // ck stake ICRC path (E6.S8 depth)
     var cyclesBalanceThreshold = 1_000_000_000_000;  // 1T cycles default
     var errorRateThreshold     = 5.0;                // 5% default
   };
@@ -144,6 +161,8 @@ persistent actor self {
   let rateCache = Map.empty<Types.TradeToken, PaymentsLib.RateCacheEntry>();
   // addressVerifyCache: on-chain address verification results (address#network → AddressVerification)
   let addressVerifyCache = Map.empty<Text, Types.AddressVerification>();
+  // usedPaymentTxHashes: txHash → tradeId (LG-09 reuse guard)
+  let usedPaymentTxHashes = Map.empty<Text, Types.TradeId>();
 
   // Observability domain (Phase 2)
   let errorLog      : List.List<Obs.ErrorLogEntry>        = List.empty<Obs.ErrorLogEntry>();
@@ -160,15 +179,18 @@ persistent actor self {
   let treasuryWithdrawals : List.List<TreasuryLib.WithdrawalRecord>         = List.empty<TreasuryLib.WithdrawalRecord>();
   let nextWithdrawalId    = { var value : Nat = 0 };
 
+  // Insurance reserve domain (E10.S4) — separate from operating treasury
+  let insuranceLedger         = { var value : Nat = 0 };
+  let insuranceAccruals       = Map.empty<Types.TradeId, InsuranceReserveLib.AccrualRecord>();
+  let insurancePayouts        = Map.empty<Nat, InsuranceReserveLib.PayoutRequest>();
+  let insuranceDailyPaid      = Map.empty<Principal, (Nat, Types.Timestamp)>();
+  let nextInsurancePayoutId   = { var value : Nat = 0 };
+
   // Vault domain — cross-chain stablecoin deposit address derivation + balance cache
   let vaultAddressCache : Map.Map<VaultLib.CacheKey, VaultLib.VaultAddress> =
     Map.empty<VaultLib.CacheKey, VaultLib.VaultAddress>();
   let vaultBalanceCache : Map.Map<VaultBalances.BalanceCacheKey, VaultBalances.BalanceResult> =
     Map.empty<VaultBalances.BalanceCacheKey, VaultBalances.BalanceResult>();
-
-  // Object storage — blob lifecycle for Caffeine gateway protocol
-  let objectStorageLiveBlobs = Map.empty<Text, { hash : Text; createdAt : Int }>();
-  let objectStoragePendingDelete = Set.empty<Text>();
 
   // Engagement domain (OLX Phase B)
   let favorites         = Map.empty<Types.UserId, Set.Set<Types.ListingId>>();
@@ -182,20 +204,62 @@ persistent actor self {
   let nextInquiryMsgId    = { var value : Nat = 0 };
   let rateLimitInquiry    = Map.empty<Principal, (Nat, Types.Timestamp)>();
 
+  // Wallet link domain (E4.S7)
+  let walletLinkChallenges = Map.empty<Nat, WalletLink.ChallengeRecord>();
+  let nextWalletChallengeId = { var value : Nat = 0 };
+  let nextLinkedWalletId    = { var value : Nat = 0 };
+
+  // Stake domain (E6.S8)
+  let stakeBalances = Map.empty<StakeLib.StakeKey, Types.StakeBalance>();
+  let listingStakes = Map.empty<Types.ListingId, Types.ListingStakeRecord>();
+  let rateLimitStakeOps = Map.empty<Principal, (Nat, Types.Timestamp)>();
+  let rateLimitDigitalUpload = Map.empty<Principal, (Nat, Types.Timestamp)>();
+  let nextDigitalFileVersionId = { var value : Nat = 1 };
+
   // ─── Mixin composition ────────────────────────────────────────────────────
 
-  include AuthMixin(users, rateLimitState);
+  include AuthMixin(
+    users, rateLimitState,
+    listings, trades, messages, tradeIndex,
+    savedSearches, favorites, feedbacks, userFeedbackIndex, notifications,
+    walletLinkChallenges, nextWalletChallengeId, nextLinkedWalletId,
+    auditLog, nextAuditId,
+    systemSettings,
+  );
 
   include MarketplaceMixin(
     listings, users, spamTracker, nextListingId,
     rateLimitCreateListing, rateLimitListingMutations,
     auditLog, nextAuditId, selfPrincipal,
+    savedSearches, notifications, nextNotificationId,
+    stakeBalances, listingStakes, trades,
+    nextDigitalFileVersionId, rateLimitDigitalUpload,
+    liabilityRecords,
   );
-  include EscrowMixin(users, listings, trades, cancelProposals, nextTradeId, treasuryId, selfPrincipal, disputes, nextDisputeId, processingTrades, rateLimitInitiateTrade, rateLimitConfirmPayment, systemSettings);
+  include EscrowMixin(users, listings, trades, listingStakes, cancelProposals, nextTradeId, treasuryId, selfPrincipal, disputes, nextDisputeId, processingTrades, rateLimitInitiateTrade, rateLimitConfirmPayment, systemSettings, liabilityRecords, nextLiabilityId);
   include ReputationMixin(users, trades, feedbacks, userFeedbackIndex, nextFeedbackId);
-  include DisputesMixin(disputes, trades, users, jurors, juryMap, nextDisputeId, selfPrincipal, rateLimitOpenDispute, rateLimitAddEvidence);
-  include PaymentsMixin(trades, users, systemSettings, rateLimitVerify, paymentErrorLog, errorLog, moduleMetrics, nextErrorId, rateCache, addressVerifyCache);
-  include ShippingMixin(systemSettings, shippingCache, nextWaybillSeed, trades, listings);
+  include DisputesMixin(
+    disputes,
+    trades,
+    users,
+    jurors,
+    juryMap,
+    nextDisputeId,
+    selfPrincipal,
+    rateLimitOpenDispute,
+    rateLimitAddEvidence,
+    liabilityRecords,
+    nextLiabilityId,
+    stakeBalances,
+    listingStakes,
+    insuranceLedger,
+    insuranceAccruals,
+    insurancePayouts,
+    insuranceDailyPaid,
+    nextInsurancePayoutId,
+  );
+  include PaymentsMixin(trades, listings, users, systemSettings, rateLimitVerify, paymentErrorLog, errorLog, moduleMetrics, nextErrorId, rateCache, addressVerifyCache, usedPaymentTxHashes, selfPrincipal);
+  include ShippingMixin(systemSettings, shippingCache, nextWaybillSeed, trades, listings, trackingTimelines);
   include MessagingMixin(messages, tradeIndex, trades, users, lastReadPtrs, nextMessageId, notifications, nextNotificationId, rateLimitSendMessage, linkPreviewCache);
   include AdminMixin(
     users,
@@ -211,6 +275,8 @@ persistent actor self {
     moduleMetrics,
     nextErrorId,
     requestLog,
+    liabilityRecords,
+    nextLiabilityId,
   );
   include GovernanceMixin(
     proposals,
@@ -221,9 +287,23 @@ persistent actor self {
     treasuryWithdrawals,
     nextWithdrawalId,
     systemSettings,
+    insuranceLedger,
+    insuranceAccruals,
+    selfPrincipal,
+  );
+  include InsuranceMixin(
+    users,
+    trades,
+    auditLog,
+    nextAuditId,
+    insuranceLedger,
+    insuranceAccruals,
+    insurancePayouts,
+    insuranceDailyPaid,
+    nextInsurancePayoutId,
   );
   include VaultMixin(users, vaultAddressCache, vaultBalanceCache, systemSettings);
-  include ObjectStorageMixin(objectStorageLiveBlobs, objectStoragePendingDelete);
+  include MixinObjectStorage();
 
   include EngagementMixin(
     listings,
@@ -238,6 +318,18 @@ persistent actor self {
     nextInquiryId,
     nextInquiryMsgId,
     rateLimitInquiry,
+  );
+
+  include StakeMixin(
+    users,
+    stakeBalances,
+    listingStakes,
+    listings,
+    trades,
+    rateLimitStakeOps,
+    systemSettings,
+    selfPrincipal,
+    treasuryId,
   );
 
 }

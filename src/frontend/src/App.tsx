@@ -9,6 +9,7 @@ import { ProfileGuard } from "./components/ProfileGuard";
 import Layout from "./components/layout/Layout";
 import { NotificationProvider } from "./contexts/NotificationContext";
 import { LocaleProvider } from "./hooks/useLocale";
+import { validateCreateListingSearch } from "./lib/createListingSearch";
 import { validateListingsSearch } from "./lib/listingsSearch";
 
 // Lazy page imports
@@ -134,9 +135,10 @@ const listingDetailRoute = createRoute({
   ),
 });
 
-const createListingRoute = createRoute({
+export const createListingRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/listings/create",
+  validateSearch: validateCreateListingSearch,
   component: () => (
     <GuardedPage>
       <CreateListing />

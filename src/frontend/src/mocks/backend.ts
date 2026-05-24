@@ -1,5 +1,6 @@
 import type { backendInterface } from "../backend";
 import type { EscrowAccount as _EscrowAccount } from "../backend.d";
+import { KycTier } from "../backend.d";
 import {
   DisputeReason,
   DisputeStatus,
@@ -27,6 +28,7 @@ const sampleUser = {
   username: "crypto_seller_ua",
   createdAt: BigInt(Date.now() * 1_000_000),
   trustLevel: TrustLevel.silver,
+  kycTier: KycTier.none,
   role: UserRole.user,
   avatarUrl: "",
   isBanned: false,
@@ -115,6 +117,41 @@ export const mockBackend = {
   _immutableObjectStorageBlobsToDelete: async () => [],
   _immutableObjectStorageConfirmBlobDeletion: async () => undefined,
   addComplianceNote: async () => undefined,
+  adminSetTrustlessEscrowEnabled: async () => ({ __kind__: "ok" as const, ok: undefined }),
+  adminGetGateCChecklist: async () => ({
+    testnetE2ePassed: false,
+    rollbackTestsPassed: false,
+    subaccountDesignReviewed: false,
+    betaCapsConfigured: false,
+    securitySignOffRef: "",
+    ckBetaCapUsdCents: 50_000n,
+    checklistComplete: false,
+    trustlessEscrowEnabled: false,
+  }),
+  adminListLiabilities: async () => ({ __kind__: "ok" as const, ok: [] }),
+  adminPartialClearLiability: async () => ({ __kind__: "ok" as const, ok: undefined }),
+  adminClearUserLiability: async () => ({ __kind__: "ok" as const, ok: undefined }),
+  adminUpdateGateCChecklist: async () => undefined,
+  adminSetUserKycTier: async () => ({ __kind__: "ok", ok: undefined }),
+  getPlatformFlags: async () => ({
+    trustlessEscrowEnabled: false,
+    ckUsdcLedgerId: "xevnm-gaaaa-aaaar-qafnq-cai",
+    ckUsdtLedgerId: "cngnf-vqaaa-aaaar-qag4q-cai",
+  }),
+  getInsuranceProtectionView: async (tradeAmountE8s: bigint, _tradeToken: unknown) => ({
+    tier: { no_guarantee: null },
+    liquidBalanceE8s: 0n,
+    tradeAmountUsdCents: tradeAmountE8s / 1_000_000n,
+    maxPayoutE8s: 0n,
+    dailyRemainingE8s: 0n,
+    insuranceOffered: false,
+  }),
+  getSellerFaultSettlementView: async () => null,
+  getInsuranceReserveLedger: async () => ({
+    liquidBalanceE8s: 0n,
+    accrualCount: 0n,
+    pendingPayouts: 0n,
+  }),
   addEvidence: async () => ({ __kind__: "ok", ok: null }),
   addModeratorNote: async () => ({ __kind__: "ok", ok: null }),
   adminGetAllTrades: async () => [sampleTrade],
@@ -134,6 +171,12 @@ export const mockBackend = {
     skippedByDispute: BigInt(0),
   }),
   confirmPaymentReceived: async () => ({ __kind__: "ok", ok: null }),
+  confirmBuyerReceipt: async () => ({ __kind__: "ok", ok: null }),
+  markShipped: async () => ({ __kind__: "ok", ok: null }),
+  checkFulfillmentDeadlines: async () => ({
+    shipByEscalations: 0n,
+    autoCompletions: 0n,
+  }),
   confirmPaymentSent: async () => ({ __kind__: "ok", ok: null }),
   createListing: async () => ({ __kind__: "ok", ok: sampleListing }),
   createMeestTTN: async () => ({ __kind__: "ok", ok: "MEEST-TTN-123456" }),
@@ -142,7 +185,19 @@ export const mockBackend = {
   createUkrPoshtaWaybill: async () => ({ __kind__: "ok", ok: "UP-TN-654321" }),
   createUkrposhtaTTN: async () => ({ __kind__: "ok", ok: "UP-TTN-654321" }),
   createWaybill: async () => ({ __kind__: "ok", ok: "NP-TN-999888" }),
-  deactivateListing: async () => ({ __kind__: "ok", ok: null }),
+  deactivateListing: async () => ({ __kind__: "ok" as const, ok: null }),
+  deleteMyAccount: async () => ({ __kind__: "ok" as const, ok: null }),
+  exportMyAccountData: async () => ({
+    exportedAt: BigInt(Date.now() * 1_000_000),
+    favoriteListingIds: [],
+    feedback: [],
+    listings: [],
+    messages: [],
+    principal: FAKE_PRINCIPAL,
+    profile: null,
+    savedSearches: [],
+    trades: [],
+  }),
   reactivateListing: async () => ({ __kind__: "ok", ok: null }),
   demoteFromModerator: async () => undefined,
   estimateTokenAmount: async () => BigInt(950),
@@ -231,6 +286,8 @@ export const mockBackend = {
   }),
   getListing: async () => sampleListing,
   getListingsByUser: async () => [sampleListing],
+  getPublicListingsByUser: async () => [sampleListing],
+  getSellerPaymentMethodsForTrade: async () => [],
   getModeratorThread: async () => [],
   getModuleMetrics: async () => [
     {
@@ -360,6 +417,30 @@ export const mockBackend = {
     symbol: "USDT",
   }),
   getTrade: async () => sampleTrade,
+  getTradeFeeQuote: async (listingId: bigint) => {
+    if (listingId !== sampleListing.id) return null;
+    const itemPrice = sampleListing.priceAmount;
+    const platformFeeAmount = (itemPrice * 300n + 9999n) / 10000n;
+    return {
+      itemPrice,
+      platformFeeAmount,
+      platformFeeBps: 300n,
+      totalBuyerAmount: itemPrice + platformFeeAmount,
+      token: sampleListing.priceToken,
+      usesDefaultFeeBps: true,
+    };
+  },
+  tradeCapTierCheck: async () => ({
+    tier: { standard: null },
+    allowed: true,
+    usdCents: BigInt(9500),
+    ckOnlyRequired: false,
+    gateCRequired: false,
+    sellerVerifiedTierOk: false,
+    elevatedStakeRequired: BigInt(0),
+    sellerStakeOk: true,
+    blockReason: [],
+  }),
   getTradeMessages: async () => [
     {
       id: BigInt(1),
@@ -394,6 +475,8 @@ export const mockBackend = {
   getUserProfile: async () => sampleUser,
   getUserReputationStats: async () => ({
     reputationScore: BigInt(480),
+    buyerScore: BigInt(120),
+    sellerScore: BigInt(360),
     trustLevel: TrustLevel.silver,
     averageRating: 4.8,
     completedTrades: BigInt(42),
@@ -509,6 +592,7 @@ export const mockBackend = {
   verifyTronAddress: async () => ({ __kind__: "ok" as const, ok: { active: true, txCount: BigInt(0), verifiedAt: BigInt(Date.now() * 1_000_000) } }),
   getTradeNotifications: async () => [],
   markAllNotificationsRead: async () => ({ __kind__: "ok" as const, ok: null }),
+  platformFeeBps: async () => 300n,
   markNotificationRead: async () => ({ __kind__: "ok" as const, ok: null }),
   // Phase 2 observability
   getMetricsSummary: async () => ({
@@ -554,10 +638,12 @@ export const mockBackend = {
       name: _name,
       paramsJson,
       createdAt: BigInt(Date.now() * 1_000_000),
+      alertsEnabled: false,
     },
   }),
   deleteSavedSearch: async () => ({ __kind__: "ok" as const, ok: null }),
   getSavedSearches: async () => [],
+  setSavedSearchAlerts: async () => ({ __kind__: "ok" as const, ok: null }),
   sendListingInquiry: async (_lid: bigint, content: string) => ({
     __kind__: "ok" as const,
     ok: {

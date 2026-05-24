@@ -3,6 +3,7 @@ import type { ListingCard } from "@/backend.d";
 import { type TradeToken, TrustLevel } from "@/backend.d";
 import type { FilterState } from "@/components/marketplace/FilterPanel";
 import { FilterPanel } from "@/components/marketplace/FilterPanel";
+import { SavedSearchesPanel } from "@/components/marketplace/SavedSearchesPanel";
 import { SearchBar } from "@/components/marketplace/SearchBar";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +17,9 @@ import {
 } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { categoryLabel, getCategoryById } from "@/data/olxCategories";
+import { searchListingsWithCategory } from "@/lib/marketplaceActor";
+import { formatTokenAmount, tokenDecimals } from "@/lib/tradeFeeQuote";
 import { useActor } from "@caffeineai/core-infrastructure";
 import { useQuery } from "@tanstack/react-query";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
@@ -27,9 +31,6 @@ import {
   Star,
   X,
 } from "lucide-react";
-import { searchListingsWithCategory } from "@/lib/marketplaceActor";
-import { SavedSearchesPanel } from "@/components/marketplace/SavedSearchesPanel";
-import { categoryLabel, getCategoryById } from "@/data/olxCategories";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocale } from "../hooks/useLocale";
 import {
@@ -68,9 +69,17 @@ const TRUST_CLASSES: Record<TrustLevel, string> = {
   [TrustLevel.gold]: "badge-tier-gold",
 };
 
-function formatPrice(amount: bigint, _token: TradeToken): string {
-  const n = Number(amount);
-  return `$${(n / 1_000_000).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+function formatPrice(amount: bigint, token: TradeToken): string {
+  return formatTokenAmount(amount, token);
+}
+
+function displayPriceToChainAmount(
+  displayPrice: string,
+  token: TradeToken | null,
+): bigint {
+  const price = Number.parseFloat(displayPrice);
+  const decimals = token ? tokenDecimals(token) : 6;
+  return BigInt(Math.floor(price * 10 ** decimals));
 }
 
 // ── Components ────────────────────────────────────────────────────────────────
@@ -209,7 +218,10 @@ function ActiveFilterChips({
 
   if (filters.categoryId != null) {
     const catNode = getCategoryById(filters.categoryId);
-  const loc = (typeof window !== "undefined" && document.documentElement.lang === "uk") ? "uk" : "en";
+    const loc =
+      typeof window !== "undefined" && document.documentElement.lang === "uk"
+        ? "uk"
+        : "en";
     chips.push({
       key: "category",
       label: `${t("filter.category")}: ${catNode ? categoryLabel(catNode, loc as "uk" | "en") : filters.categoryId}`,
@@ -379,27 +391,25 @@ export default function ListingsPage() {
     queryFn: async () => {
       if (!actor) return [];
       let results: ListingCard[];
-      try {
-        results = await searchListingsWithCategory(actor, {
-          query: committedQuery || null,
-          category: null,
-          categoryId: filters.categoryId,
-          priceMin: filters.priceMin
-            ? BigInt(Math.floor(Number.parseFloat(filters.priceMin) * 1_000_000))
-            : null,
-          priceMax: filters.priceMax
-            ? BigInt(Math.floor(Number.parseFloat(filters.priceMax) * 1_000_000))
-            : null,
-          location: null,
-          condition: filters.conditions.length === 1 ? filters.conditions[0] : null,
-          shippingCarrier: filters.carriers.length === 1 ? filters.carriers[0] : null,
-          offset: BigInt(offset),
-          limit: BigInt(PAGE_SIZE),
-          priceToken: filters.token,
-        });
-      } catch {
-        results = [];
-      }
+      results = await searchListingsWithCategory(actor, {
+        query: committedQuery || null,
+        category: null,
+        categoryId: filters.categoryId,
+        priceMin: filters.priceMin
+          ? displayPriceToChainAmount(filters.priceMin, filters.token)
+          : null,
+        priceMax: filters.priceMax
+          ? displayPriceToChainAmount(filters.priceMax, filters.token)
+          : null,
+        location: null,
+        condition:
+          filters.conditions.length === 1 ? filters.conditions[0] : null,
+        shippingCarrier:
+          filters.carriers.length === 1 ? filters.carriers[0] : null,
+        offset: BigInt(offset),
+        limit: BigInt(PAGE_SIZE),
+        priceToken: filters.token,
+      });
 
       if (offset === 0) {
         setAllResults(results);
@@ -409,9 +419,13 @@ export default function ListingsPage() {
       return results;
     },
     enabled: !!actor && !isFetching && !isPriceRangeInvalid,
+    staleTime: 30_000,
   });
 
-  const sorted = useMemo(() => sortListings(allResults, sort), [allResults, sort]);
+  const sorted = useMemo(
+    () => sortListings(allResults, sort),
+    [allResults, sort],
+  );
   const hasMore = (data?.length ?? 0) === PAGE_SIZE;
 
   const handleSearch = useCallback(() => {
@@ -628,7 +642,12 @@ export default function ListingsPage() {
                   <ListingCardItem
                     key={String(listing.id)}
                     listing={listing}
-                    onClick={() => navigate({ to: `/listings/${listing.id}` })}
+                    onClick={() =>
+                      navigate({
+                        to: "/listings/$id",
+                        params: { id: String(listing.id) },
+                      })
+                    }
                   />
                 ))}
               </div>

@@ -92,7 +92,7 @@ export function FilterPanel({
   ];
 
   const CARRIERS: { value: ShippingCarrier; label: string }[] = [
-    { value: ShippingCarrier.self_pickup, label: t("carrier.self_pickup") },
+    { value: ShippingCarrier.nova_poshta, label: t("carrier.nova_poshta") },
   ];
 
   // 4 approved tokens only (UI-scoped; backend enum has more)

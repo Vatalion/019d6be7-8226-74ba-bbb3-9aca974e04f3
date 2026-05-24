@@ -1,3 +1,5 @@
+import { TradeToken } from "@/backend.d";
+import { BuyerProtectionBadge } from "@/components/trade/BuyerProtectionBadge";
 import { Button } from "@/components/ui/button";
 import { useLocale } from "@/hooks/useLocale";
 import { Link } from "@tanstack/react-router";
@@ -19,23 +21,37 @@ export default function HowPaymentsWorkPage() {
     {
       title: t("paymentsGuide.phase2.title"),
       body: t("paymentsGuide.phase2.body"),
-      items: [
-        t("paymentsGuide.phase2.item1"),
-        t("paymentsGuide.phase2.item2"),
-      ],
+      items: [t("paymentsGuide.phase2.item1"), t("paymentsGuide.phase2.item2")],
     },
     {
       title: t("paymentsGuide.phase3.title"),
       body: t("paymentsGuide.phase3.body"),
       items: [t("paymentsGuide.phase3.item1")],
     },
+    {
+      title: t("insurance.section.title"),
+      body: t("insurance.section.body"),
+      items: [
+        t("insurance.section.item1"),
+        t("insurance.section.item2"),
+        t("insurance.section.item3"),
+      ],
+    },
   ];
 
   return (
-    <div className="min-h-screen bg-background" data-ocid="how-payments-work-page">
+    <div
+      className="min-h-screen bg-background"
+      data-ocid="how-payments-work-page"
+    >
       <div className="max-w-3xl mx-auto px-4 py-8 sm:py-12 space-y-8">
         <div>
-          <Button variant="ghost" size="sm" className="gap-2 -ml-2 mb-4" asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-2 -ml-2 mb-4"
+            asChild
+          >
             <Link to="/">
               <ArrowLeft className="w-4 h-4" />
               {t("paymentsGuide.backHome")}
@@ -78,6 +94,11 @@ export default function HowPaymentsWorkPage() {
             </section>
           ))}
         </div>
+
+        <BuyerProtectionBadge
+          tradeAmountE8s={100_000_000n}
+          tradeToken={TradeToken.USDT_TRC20}
+        />
 
         <div className="flex flex-col sm:flex-row gap-3 pt-2">
           <Button asChild className="flex-1">

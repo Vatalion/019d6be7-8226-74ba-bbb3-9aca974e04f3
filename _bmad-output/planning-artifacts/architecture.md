@@ -79,7 +79,7 @@ src/frontend/src/
   components/      # Feature + ui/
   contexts/        # Notifications, locale
   hooks/           # useAuth, useBackend
-  lib/deliveryPolicy.ts  # Product lock: pickup-only
+  lib/deliveryPolicy.ts  # Phase 1.5 policy: Nova Poshta-only once E7.S3 ships; self-pickup deferred
 ```
 
 ## 6. Trade settlement (critical)
@@ -97,8 +97,8 @@ src/frontend/src/
 
 ### Phase 3 (planned)
 
-- ICRC-1 transfers + threshold ECDSA escrow.
-- HTLC only if explicitly re-approved in PRD.
+- ICRC/ck-token escrow behind Gate C.
+- External vaults and cross-chain lock-release require a separate ADR + owner approval before implementation.
 
 ## 7. Security architecture
 
@@ -133,7 +133,7 @@ src/frontend/src/
 ## 10. Verification
 
 - Motoko: `mops test`
-- Live: `caf app smoke`, flow templates in caffeine-cli `.caf/projects/.../verification/`
+- Live: Caffeine smoke plus flow templates from Caffeine project verification state.
 
 ## 11. Architecture decisions log
 

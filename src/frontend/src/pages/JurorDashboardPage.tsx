@@ -272,23 +272,13 @@ function CaseCard({ entry, onVote }: CaseCardProps) {
       return actor.getDispute(entry.disputeId);
     },
     enabled: !!actor && !isFetching && expanded,
+    staleTime: 60_000,
   });
 
-  const { data: juryView } = useQuery({
-    queryKey: ["juryView", entry.disputeId.toString()],
-    queryFn: async () => {
-      if (!actor) return null;
-      return actor.getDisputeJurors(entry.disputeId);
-    },
-    enabled: !!actor && !isFetching,
-  });
-
-  const votedCount = juryView?.votes.length ?? 0;
-  const totalJurors = juryView?.jurors.length ?? 3;
-  const buyerVotes =
-    juryView?.votes.filter((v) => v.vote === "buyerWins").length ?? 0;
-  const sellerVotes =
-    juryView?.votes.filter((v) => v.vote === "sellerWins").length ?? 0;
+  const buyerVotes = Number(entry.buyerVotes);
+  const sellerVotes = Number(entry.sellerVotes);
+  const votedCount = buyerVotes + sellerVotes;
+  const totalJurors = Number(entry.totalJurors) || 3;
 
   const expandLabel = expanded
     ? t("jurors.collapseCase")
@@ -437,7 +427,7 @@ function CaseCard({ entry, onVote }: CaseCardProps) {
               )}
 
               {/* Vote tally breakdown */}
-              {juryView && (buyerVotes > 0 || sellerVotes > 0) && (
+              {(buyerVotes > 0 || sellerVotes > 0) && (
                 <div
                   className="flex items-center gap-3 text-xs text-muted-foreground"
                   data-ocid={`vote-tally-${entry.disputeId}`}
@@ -581,6 +571,7 @@ export default function JurorDashboardPage() {
       return actor.getMyJurorDashboard();
     },
     enabled: !!actor && !isFetching && isAuthenticated,
+    staleTime: 60_000,
     refetchInterval: 30_000,
   });
 

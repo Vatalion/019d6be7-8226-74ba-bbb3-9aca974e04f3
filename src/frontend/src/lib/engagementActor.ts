@@ -6,6 +6,7 @@ export type SavedSearch = {
   name: string;
   paramsJson: string;
   createdAt: bigint;
+  alertsEnabled: boolean;
 };
 
 export type ListingInquiryMessage = {
@@ -23,10 +24,20 @@ export type EngagementActor = {
   removeFavorite?: (listingId: bigint) => Promise<Result<null>>;
   isListingFavorite?: (listingId: bigint) => Promise<boolean>;
   getFavoriteListings?: () => Promise<ListingCard[]>;
-  saveSearch?: (name: string, paramsJson: string) => Promise<Result<SavedSearch>>;
+  saveSearch?: (
+    name: string,
+    paramsJson: string,
+  ) => Promise<Result<SavedSearch>>;
   deleteSavedSearch?: (id: bigint) => Promise<Result<null>>;
   getSavedSearches?: () => Promise<SavedSearch[]>;
-  sendListingInquiry?: (listingId: bigint, content: string) => Promise<Result<ListingInquiryMessage>>;
+  setSavedSearchAlerts?: (
+    id: bigint,
+    enabled: boolean,
+  ) => Promise<Result<null>>;
+  sendListingInquiry?: (
+    listingId: bigint,
+    content: string,
+  ) => Promise<Result<ListingInquiryMessage>>;
   sendListingInquiryReply?: (
     listingId: bigint,
     buyerPrincipal: Principal,
@@ -46,5 +57,8 @@ export function asEngagementActor(actor: unknown): EngagementActor {
 export function isResultErr(r: unknown): boolean {
   if (r == null || typeof r !== "object") return false;
   const record = r as { __kind__?: string; err?: unknown };
-  return record.__kind__ === "err" || (record.__kind__ === undefined && "err" in record);
+  return (
+    record.__kind__ === "err" ||
+    (record.__kind__ === undefined && "err" in record)
+  );
 }

@@ -1,5 +1,5 @@
 import { CheckCircle2, X } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useLocale } from "../hooks/useLocale";
 
 type BaseToken = "USDT" | "USDC";
@@ -38,17 +38,48 @@ export function NetworkSelectionDialog({
   onClose,
 }: Props) {
   const { t: tl } = useLocale();
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   const networks = baseToken === "USDT" ? USDT_NETWORKS : USDC_NETWORKS;
 
-  // Close on Escape
   useEffect(() => {
     if (!open) return;
+    const previouslyFocused = document.activeElement;
+    closeButtonRef.current?.focus();
+
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+
+      const focusable = Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      ).filter((el) => !el.hasAttribute("disabled"));
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) return;
+
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
+
     document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
+    return () => {
+      document.removeEventListener("keydown", handler);
+      if (previouslyFocused instanceof HTMLElement) {
+        previouslyFocused.focus();
+      }
+    };
   }, [open, onClose]);
 
   if (!open) return null;
@@ -61,27 +92,27 @@ export function NetworkSelectionDialog({
       data-ocid="network-dialog"
     >
       {/* Backdrop */}
-      <div
+      <button
+        type="button"
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
         onClick={onClose}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") onClose();
-        }}
-        role="button"
         tabIndex={-1}
         aria-label="Close dialog"
       />
 
       {/* Dialog panel */}
       <dialog
+        ref={dialogRef}
         open
         className="relative z-10 w-full max-w-sm bg-card border border-border rounded-2xl shadow-xl overflow-hidden p-0 m-0"
         aria-label={title}
+        aria-modal="true"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <h2 className="text-base font-semibold text-foreground">{title}</h2>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             className="text-muted-foreground hover:text-foreground transition-colors rounded-full p-1 hover:bg-muted"

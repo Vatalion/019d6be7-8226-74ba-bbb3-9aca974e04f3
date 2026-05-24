@@ -32,7 +32,7 @@ module {
     maxCalls     : Nat,
     rateLimitMap : Map.Map<Principal, (Nat, Types.Timestamp)>,
   ) : Bool {
-    let now : Types.Timestamp = Time.now();
+    let now : Types.Timestamp = Types.now();
 
     switch (rateLimitMap.get(caller)) {
       case null {
@@ -41,9 +41,9 @@ module {
         true
       };
       case (?(count, windowStart)) {
-        let elapsed : Int = now - windowStart;
+        let elapsed = now - windowStart;
 
-        if (elapsed < 0 or elapsed >= windowNs.toInt()) {
+        if (elapsed >= windowNs) {
           // Window has expired — start a fresh window
           rateLimitMap.add(caller, (1, now));
           true

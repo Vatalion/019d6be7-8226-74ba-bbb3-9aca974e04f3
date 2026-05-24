@@ -5,6 +5,7 @@ import {
   Banknote,
   CheckCircle2,
   Clock,
+  Handshake,
   RotateCcw,
   ShieldCheck,
   XCircle,
@@ -17,29 +18,37 @@ interface EscrowTimelineProps {
   fundedAt?: Timestamp;
   confirmedAt?: Timestamp;
   completedAt?: Timestamp;
+  sellerResponseDeadline?: Timestamp;
 }
 
 type StepState = "completed" | "active" | "upcoming";
 
-// Map TradeStatus to a 0-based step index in the 6-step manual flow
-// Steps: 0=initiated, 1=awaitingPayment, 2=buyerConfirmed, 3=awaitingSeller, 4=sellerConfirmed, 5=complete
+function formatTs(ts?: Timestamp): string | undefined {
+  if (!ts) return undefined;
+  return new Date(Number(ts) / 1_000_000).toLocaleString();
+}
+
 function getActiveStepIndex(status: TradeStatus): number {
   switch (status) {
-    case TradeStatus.pending:
-      return 0;
-    case TradeStatus.funded:
+    case TradeStatus.awaiting_seller_handshake:
       return 1;
+    case TradeStatus.payment_intent:
+    case TradeStatus.manual_payment_pending:
+    case TradeStatus.pending:
+    case TradeStatus.payment_intent_expired:
+      return 2;
+    case TradeStatus.funded:
+      return 3;
     case TradeStatus.buyer_confirmed:
-      return 3; // buyer confirmed → step 3 (buyer confirmed shown as completed at 2, seller awaiting at 3)
-    case TradeStatus.payment_verified:
       return 4;
-    case TradeStatus.complete:
+    case TradeStatus.payment_verified:
+    case TradeStatus.fulfillment_pending:
+    case TradeStatus.digital_delivered:
+    case TradeStatus.shipped:
+    case TradeStatus.awaiting_receipt:
       return 5;
-    // terminal: show all steps up to last meaningful step as completed
-    case TradeStatus.cancelled:
-    case TradeStatus.refunded:
-    case TradeStatus.disputed:
-      return -1; // handled separately
+    case TradeStatus.complete:
+      return 6;
     default:
       return 0;
   }
@@ -48,13 +57,25 @@ function getActiveStepIndex(status: TradeStatus): number {
 function getStepState(stepIndex: number, status: TradeStatus): StepState {
   const isTerminal = [
     TradeStatus.cancelled,
+    TradeStatus.cancelled_no_seller_response,
+    TradeStatus.cancelled_buyer_pre_ship,
     TradeStatus.refunded,
     TradeStatus.disputed,
+    TradeStatus.dispute_l1,
+    TradeStatus.dispute_l2,
   ].includes(status);
 
   if (isTerminal) {
-    // For terminal states, mark steps before the last meaningful point as completed
-    const lastMeaningful = status === TradeStatus.buyer_confirmed ? 2 : 1;
+    const lastMeaningful =
+      status === TradeStatus.cancelled_no_seller_response
+        ? 1
+        : status === TradeStatus.buyer_confirmed
+          ? 4
+          : status === TradeStatus.dispute_l1 ||
+              status === TradeStatus.dispute_l2 ||
+              status === TradeStatus.disputed
+            ? 5
+            : 2;
     if (stepIndex < lastMeaningful) return "completed";
     return "upcoming";
   }
@@ -65,17 +86,13 @@ function getStepState(stepIndex: number, status: TradeStatus): StepState {
   return "upcoming";
 }
 
-function formatTs(ts?: Timestamp): string | undefined {
-  if (!ts) return undefined;
-  return new Date(Number(ts) / 1_000_000).toLocaleString();
-}
-
 export function EscrowTimeline({
   status,
   createdAt,
   fundedAt,
   confirmedAt,
   completedAt,
+  sellerResponseDeadline,
 }: EscrowTimelineProps) {
   const { t } = useLocale();
 
@@ -86,6 +103,13 @@ export function EscrowTimeline({
       description: t("escrow.step.accepted.desc"),
       subText: undefined as string | undefined,
       timestamp: createdAt,
+    },
+    {
+      icon: <Handshake className="w-4 h-4" />,
+      label: t("trade.step.sellerHandshake"),
+      description: t("trade.handshake.sellerPrompt"),
+      subText: t("trade.handshake.noPaymentYet"),
+      timestamp: sellerResponseDeadline,
     },
     {
       icon: <Clock className="w-4 h-4" />,
@@ -126,8 +150,12 @@ export function EscrowTimeline({
 
   const isTerminal = [
     TradeStatus.cancelled,
+    TradeStatus.cancelled_no_seller_response,
+    TradeStatus.cancelled_buyer_pre_ship,
     TradeStatus.refunded,
     TradeStatus.disputed,
+    TradeStatus.dispute_l1,
+    TradeStatus.dispute_l2,
   ].includes(status);
 
   const terminalMap: Record<
@@ -135,6 +163,18 @@ export function EscrowTimeline({
     { icon: React.ReactNode; label: string; description: string; cls: string }
   > = {
     [TradeStatus.disputed]: {
+      icon: <AlertTriangle className="w-4 h-4" />,
+      label: t("escrow.terminal.disputed.label"),
+      description: t("escrow.terminal.disputed.desc"),
+      cls: "text-destructive border-destructive bg-destructive/10",
+    },
+    [TradeStatus.dispute_l1]: {
+      icon: <AlertTriangle className="w-4 h-4" />,
+      label: t("escrow.terminal.disputed.label"),
+      description: t("escrow.terminal.disputed.desc"),
+      cls: "text-destructive border-destructive bg-destructive/10",
+    },
+    [TradeStatus.dispute_l2]: {
       icon: <AlertTriangle className="w-4 h-4" />,
       label: t("escrow.terminal.disputed.label"),
       description: t("escrow.terminal.disputed.desc"),
@@ -152,10 +192,23 @@ export function EscrowTimeline({
       description: t("escrow.terminal.cancelled.desc"),
       cls: "text-muted-foreground border-muted-foreground/40 bg-muted/30",
     },
+    [TradeStatus.cancelled_no_seller_response]: {
+      icon: <XCircle className="w-4 h-4" />,
+      label: t("escrow.terminal.cancelled_no_seller_response.label"),
+      description: t("escrow.terminal.cancelled_no_seller_response.desc"),
+      cls: "text-muted-foreground border-muted-foreground/40 bg-muted/30",
+    },
+    [TradeStatus.cancelled_buyer_pre_ship]: {
+      icon: <XCircle className="w-4 h-4" />,
+      label: t("escrow.terminal.cancelled_buyer_pre_ship.label"),
+      description: t("escrow.terminal.cancelled_buyer_pre_ship.desc"),
+      cls: "text-muted-foreground border-muted-foreground/40 bg-muted/30",
+    },
   };
 
   const STEP_KEYS = [
     "initiated",
+    "sellerHandshake",
     "awaitingPayment",
     "buyerConfirmed",
     "awaitingSeller",
@@ -183,7 +236,6 @@ export function EscrowTimeline({
 
         return (
           <div key={STEP_KEYS[i]} className="flex items-start gap-3">
-            {/* Dot + line */}
             <div className="flex flex-col items-center flex-shrink-0">
               <div
                 className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all ${dotCls}`}
@@ -203,7 +255,6 @@ export function EscrowTimeline({
               )}
             </div>
 
-            {/* Content */}
             <div className="pb-4 pt-1 min-w-0">
               <p
                 className={`text-sm font-semibold leading-tight ${
@@ -219,7 +270,6 @@ export function EscrowTimeline({
               <p className="text-xs text-muted-foreground mt-0.5">
                 {step.description}
               </p>
-              {/* Sub-text hint — only shown when this step is active */}
               {step.subText && state === "active" && (
                 <p className="text-xs text-primary/80 mt-1 italic">
                   {step.subText}
@@ -235,7 +285,6 @@ export function EscrowTimeline({
         );
       })}
 
-      {/* Terminal step */}
       {isTerminal && terminalMap[status] && (
         <div className="flex items-start gap-3">
           <div className="flex flex-col items-center flex-shrink-0">

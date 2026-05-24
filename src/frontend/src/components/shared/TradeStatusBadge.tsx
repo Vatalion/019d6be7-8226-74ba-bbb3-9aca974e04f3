@@ -15,6 +15,33 @@ type StatusConfig = {
 };
 
 const STATUS_CONFIG: Record<string, StatusConfig> = {
+  awaiting_seller_handshake: {
+    labelKey: "trade.status.awaiting_seller_handshake",
+    dotClass: "bg-amber-500",
+    badgeClass: "status-badge-pending",
+  },
+  payment_intent: {
+    labelKey: "trade.status.payment_intent",
+    dotClass: "bg-blue-500",
+    badgeClass: "status-badge-funded",
+  },
+  manual_payment_pending: {
+    labelKey: "trade.status.manual_payment_pending",
+    dotClass: "bg-amber-500",
+    badgeClass: "status-badge-pending",
+  },
+  payment_intent_expired: {
+    labelKey: "trade.status.payment_intent_expired",
+    dotClass: "bg-destructive",
+    badgeClass:
+      "inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-destructive/15 text-destructive",
+  },
+  cancelled_no_seller_response: {
+    labelKey: "trade.status.cancelled_no_seller_response",
+    dotClass: "bg-muted-foreground",
+    badgeClass:
+      "inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-muted/50 text-muted-foreground",
+  },
   pending: {
     labelKey: "trade.status.pending",
     dotClass: "bg-muted-foreground",
@@ -58,6 +85,12 @@ const STATUS_CONFIG: Record<string, StatusConfig> = {
     dotClass: "bg-muted-foreground",
     badgeClass:
       "inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-muted/50 text-muted-foreground line-through",
+  },
+  cancelled_buyer_pre_ship: {
+    labelKey: "trade.status.cancelled_buyer_pre_ship",
+    dotClass: "bg-muted-foreground",
+    badgeClass:
+      "inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-muted/50 text-muted-foreground",
   },
 };
 

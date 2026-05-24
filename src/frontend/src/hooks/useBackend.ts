@@ -146,8 +146,8 @@ const DEFAULT_STORAGE_GATEWAY_URL = "https://blob.caffeine.ai";
 //      "PUBLIC_CANISTER_ID:backend" when the app is deployed on the IC.
 //      @icp-sdk/core/agent/canister-env is NOT available in this version, so
 //      we parse the cookie manually.
-//   3. Hardcoded known-good values as last resort (project_id, backend_host,
-//      ii_derivation_origin only — backend_canister_id MUST come from runtime).
+//   3. Hardcoded known-good values as last resort (project_id and backend_host
+//      only — backend_canister_id MUST come from env.json or ic_env at runtime).
 //
 // Throws ONLY if backend_canister_id cannot be resolved after all fallbacks.
 // ---------------------------------------------------------------------------
@@ -159,7 +159,6 @@ const KNOWN_PROJECT_ID = "019d6be7-8226-74ba-bbb3-9aca974e04f3";
 interface EnvConfig {
   backend_canister_id: string;
   backend_host: string;
-  ii_derivation_origin: string;
   project_id: string;
   storage_gateway_url: string;
 }
@@ -192,27 +191,6 @@ function readIcEnvCookie(): Record<string, string> {
 
 async function loadEnvConfig(): Promise<EnvConfig> {
   if (cachedEnvConfig !== null) return cachedEnvConfig;
-
-  const cacheScope =
-    typeof window !== "undefined" ? window.location.hostname : "default";
-  const CACHE_KEY = `caffeine_backend_canister_id:${cacheScope}`;
-  const CACHE_TS_KEY = `caffeine_backend_canister_id_ts:${cacheScope}`;
-  const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-
-  // Step 0 — read localStorage cache (used as last-resort fallback below)
-  let cachedCanisterId: string | null = null;
-  try {
-    const cached = localStorage.getItem(CACHE_KEY);
-    const cachedTs = Number.parseInt(
-      localStorage.getItem(CACHE_TS_KEY) || "0",
-      10,
-    );
-    if (cached && Date.now() - cachedTs < CACHE_TTL_MS) {
-      cachedCanisterId = cached;
-    }
-  } catch {
-    // localStorage not available (e.g. SSR or private mode)
-  }
 
   const isPlaceholder = (v: string | undefined | null): boolean =>
     !v ||
@@ -255,13 +233,6 @@ async function loadEnvConfig(): Promise<EnvConfig> {
         fromCookie,
       );
       backend_canister_id = fromCookie;
-    } else if (cachedCanisterId) {
-      // Step 3 — fall back to localStorage cache
-      console.warn(
-        "[loadEnvConfig] backend_canister_id resolved from localStorage cache:",
-        cachedCanisterId,
-      );
-      backend_canister_id = cachedCanisterId;
     }
   }
 
@@ -289,18 +260,7 @@ async function loadEnvConfig(): Promise<EnvConfig> {
     storage_gateway_url = DEFAULT_STORAGE_GATEWAY_URL;
   }
 
-  // Resolve ii_derivation_origin — use window.location.origin as fallback
-  let ii_derivation_origin = rawData.ii_derivation_origin;
-  if (isPlaceholder(ii_derivation_origin)) {
-    const origin =
-      typeof window !== "undefined" ? window.location.origin : "https://id.ai";
-    console.warn(
-      `[loadEnvConfig] ii_derivation_origin placeholder detected — using ${origin}`,
-    );
-    ii_derivation_origin = origin;
-  }
-
-  // Step 4 — backend_canister_id is the only hard requirement; throw if still missing
+  // Step 3 — backend_canister_id is the only hard requirement; throw if still missing
   if (!backend_canister_id || isPlaceholder(backend_canister_id)) {
     throw new Error(
       "backend_canister_id could not be resolved. " +
@@ -310,22 +270,9 @@ async function loadEnvConfig(): Promise<EnvConfig> {
     );
   }
 
-  // Cache the resolved canister ID in localStorage for future sessions
-  try {
-    localStorage.setItem(CACHE_KEY, backend_canister_id);
-    localStorage.setItem(CACHE_TS_KEY, Date.now().toString());
-  } catch {
-    // ignore localStorage errors
-  }
-
   const resolved: EnvConfig = {
     backend_canister_id: backend_canister_id!,
     backend_host: backend_host ?? IC_MAINNET_HOST,
-    ii_derivation_origin:
-      ii_derivation_origin ??
-      (typeof window !== "undefined"
-        ? window.location.origin
-        : "https://id.ai"),
     project_id: project_id ?? KNOWN_PROJECT_ID,
     storage_gateway_url: storage_gateway_url ?? DEFAULT_STORAGE_GATEWAY_URL,
   };
@@ -335,7 +282,6 @@ async function loadEnvConfig(): Promise<EnvConfig> {
     project_id: resolved.project_id,
     backend_host: resolved.backend_host,
     storage_gateway_url: resolved.storage_gateway_url,
-    ii_derivation_origin: resolved.ii_derivation_origin,
     source: "env.json or fallback",
   });
 
@@ -393,6 +339,10 @@ export function useUploadFile(identity: Identity | undefined): {
     file: File,
     onProgress?: (pct: number) => void,
   ) => Promise<string>;
+  uploadFileWithHash: (
+    file: File,
+    onProgress?: (pct: number) => void,
+  ) => Promise<{ url: string; hash: string }>;
 } {
   const storageRef = useRef<StorageClient | null>(null);
   const identityRef = useRef<Identity | undefined>(undefined);
@@ -404,11 +354,11 @@ export function useUploadFile(identity: Identity | undefined): {
   // Sync the ref on every render so the callback always reads the current identity.
   identityRef.current = identity;
 
-  const uploadFile = useCallback(
+  const uploadFileWithHash = useCallback(
     async (
       file: File,
       _onProgress?: (pct: number) => void,
-    ): Promise<string> => {
+    ): Promise<{ url: string; hash: string }> => {
       const currentIdentity = identityRef.current;
 
       // Guard: must be authenticated.
@@ -429,6 +379,7 @@ export function useUploadFile(identity: Identity | undefined): {
         storageRef.current = null;
         cachedPrincipalRef.current = null;
         cachedEnvConfig = null;
+        storageGatewayPrincipalsSynced = false;
       }
 
       // Build StorageClient if not yet cached.
@@ -561,13 +512,19 @@ export function useUploadFile(identity: Identity | undefined): {
         );
       }
 
-      return url;
+      return { url, hash };
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 
-  return { uploadFile };
+  const uploadFile = useCallback(
+    async (file: File, onProgress?: (pct: number) => void) =>
+      (await uploadFileWithHash(file, onProgress)).url,
+    [uploadFileWithHash],
+  );
+
+  return { uploadFile, uploadFileWithHash };
 }
 
 // ---------------------------------------------------------------------------
@@ -604,4 +561,50 @@ function normaliseFileType(file: File): File {
     type: mimeType,
     lastModified: file.lastModified,
   });
+}
+
+/** Register encrypted digital file metadata on a listing (E2.S11). */
+export async function registerDigitalFileOnListing(
+  identity: Identity,
+  backendCanisterId: string,
+  listingId: bigint,
+  blobHash: string,
+  mimeType: string,
+  sizeBytes: number,
+  blobUrl: string,
+  dekHex: string,
+  contentHash: string | null,
+): Promise<void> {
+  const envConfig = await loadEnvConfig();
+  const agent = new HttpAgent({
+    host: envConfig.backend_host || IC_MAINNET_HOST,
+    identity,
+  });
+  await agent.call(
+    backendCanisterId,
+    {
+      methodName: "registerDigitalFile",
+      arg: IDL.encode(
+        [
+          IDL.Nat,
+          IDL.Text,
+          IDL.Text,
+          IDL.Nat,
+          IDL.Text,
+          IDL.Text,
+          IDL.Opt(IDL.Text),
+        ],
+        [
+          listingId,
+          blobHash,
+          mimeType,
+          BigInt(sizeBytes),
+          blobUrl,
+          dekHex,
+          contentHash ? [contentHash] : [],
+        ],
+      ),
+    },
+    identity,
+  );
 }

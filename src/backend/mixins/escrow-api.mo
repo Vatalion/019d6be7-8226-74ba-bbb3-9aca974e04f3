@@ -14,7 +14,9 @@ import Reputation "../lib/Reputation";
 import PaymentsLib "../lib/Payments";
 import RateLimiter "../lib/RateLimiter";
 import Admin "../lib/Admin";
-import DigitalEncryption "../lib/DigitalEncryption";
+import DigitalDeliveryLib "../lib/DigitalDelivery";
+import DisputesLib "../lib/Disputes";
+import OnChainSettlement "../lib/OnChainSettlement";
 
 /// Escrow API mixin — public endpoints for the P2P trade state machine.
 /// Covers both the manual off-chain flow and the ICRC-1 on-chain escrow flow.
@@ -23,6 +25,7 @@ mixin (
   users                : Map.Map<Types.UserId, Types.User>,
   listings             : Map.Map<Types.ListingId, Types.Listing>,
   trades               : Map.Map<Types.TradeId, Types.Trade>,
+  listingStakes        : Map.Map<Types.ListingId, Types.ListingStakeRecord>,
   cancelProposals      : Map.Map<Types.TradeId, Set.Set<Principal>>,
   nextTradeId          : { var value : Nat },
   treasuryId           : { var value : Principal },
@@ -33,29 +36,139 @@ mixin (
   rateLimitInitiateTrade  : Map.Map<Principal, (Nat, Types.Timestamp)>,
   rateLimitConfirmPayment : Map.Map<Principal, (Nat, Types.Timestamp)>,
   systemSettings       : Admin.SystemSettings,
+  liabilityRecords     : Map.Map<Nat, Types.LiabilityRecord>,
+  nextLiabilityId      : { var value : Nat },
 ) {
 
-  /// 24 hours in nanoseconds — digital goods inspection window.
-  let INSPECTION_PERIOD_NS : Int = 86_400_000_000_000;
+  func settlementErrMsg(e : Types.Error) : Text {
+    switch (e) {
+      case (#escrow_error(msg)) msg;
+      case (_) debug_show(e);
+    }
+  };
+
+  /// Executes queued ICRC settlement; finalizes terminal status only on ledger success (E9.S3).
+  func tryExecuteOnChainSettlement(tradeId : Types.TradeId) : async Types.Result<Bool> {
+    let trade = switch (trades.get(tradeId)) {
+      case null return #err(#not_found);
+      case (?t) t;
+    };
+    let pending = switch (trade.pendingOnChainSettlement) {
+      case null return #ok(false);
+      case (?p) p;
+    };
+    let escrow = switch (trade.escrowAccount) {
+      case null return #ok(false);
+      case (?e) e;
+    };
+    let ledger : EscrowLib.Icrc1Ledger = actor(escrow.ledgerCanisterId.toText());
+    let execResult = await OnChainSettlement.executePending(
+      trade, escrow, pending, users, treasuryId.value, ledger,
+    );
+    switch (execResult) {
+      case (#ok(_)) {
+        OnChainSettlement.finalizeTerminal(trade, listings, pending.targetStatus);
+        #ok(true)
+      };
+      case (#err(e)) {
+        OnChainSettlement.recordFailure(trade, settlementErrMsg(e));
+        #err(e)
+      };
+    }
+  };
+
+  func afterTradeTransitionWithSettlement(
+    tradeId : Types.TradeId,
+    applyReputation : Bool,
+  ) : async Types.Result<()> {
+    switch (await tryExecuteOnChainSettlement(tradeId)) {
+      case (#err(e)) #err(e);
+      case (#ok(didSettle)) {
+        if (applyReputation and didSettle) {
+          switch (trades.get(tradeId)) {
+            case (?t) {
+              if (t.status == #complete) {
+                EscrowLib.applyReputationUpdate(users, t);
+              };
+            };
+            case null {};
+          };
+        };
+        #ok(())
+      };
+    }
+  };
 
   // ─── Initiate Trade (manual/off-chain path) ───────────────────────────────
 
+  /// High-value trade cap preview for buy/checkout UI (E3.S11 / FR-21d).
+  public shared query func tradeCapTierCheck(
+    listingId : Types.ListingId,
+    tradeToken : Types.TradeToken,
+  ) : async EscrowLib.TradeCapTierCheck {
+    switch (listings.get(listingId)) {
+      case null {
+        {
+          tier = #rejected;
+          allowed = false;
+          usdCents = 0;
+          ckOnlyRequired = false;
+          gateCRequired = false;
+          sellerVerifiedTierOk = false;
+          elevatedStakeRequired = 0;
+          sellerStakeOk = false;
+          blockReason = ?"Listing not found";
+        }
+      };
+      case (?listing) {
+        let seller = switch (users.get(listing.seller)) {
+          case null {
+            return {
+              tier = #rejected;
+              allowed = false;
+              usdCents = 0;
+              ckOnlyRequired = false;
+              gateCRequired = false;
+              sellerVerifiedTierOk = false;
+              elevatedStakeRequired = 0;
+              sellerStakeOk = false;
+              blockReason = ?"Seller not found";
+            };
+          };
+          case (?u) u;
+        };
+        let stakeAmount = switch (listingStakes.get(listingId)) {
+          case null 0;
+          case (?rec) rec.amount;
+        };
+        EscrowLib.buildTradeCapTierCheck(
+          listing.priceAmount,
+          listing.priceToken,
+          tradeToken,
+          seller.kycTier,
+          stakeAmount,
+          systemSettings.trustlessEscrowEnabled,
+        )
+      };
+    }
+  };
+
   /// Creates a new trade using the manual confirmation flow.
-  /// For ICRC-1 stablecoins (ckUSDC, ckUSDT) use initiateOnChainTrade instead.
+  /// ckUSDC/ckUSDT: handshake first when Gate C is enabled; lock via initiateOnChainTrade after PaymentIntent.
   public shared ({ caller }) func initiateTrade(
     listingId         : Types.ListingId,
     token             : Types.TradeToken,
     shippingSelection : ?Types.ShippingSelection,
   ) : async Types.Result<Types.TradeId> {
     AuthLib.assertNotAnonymous(caller);
+    AuthLib.assertCallerNotBanned(users, caller);
     // Rate limit: 5 trades per hour per principal
     if (not RateLimiter.check(caller, 3_600_000_000_000, 5, rateLimitInitiateTrade)) {
       return #err(#rate_limited);
     };
-    // Reject ICRC-1 tokens from the manual path
-    if (EscrowLib.isOnChainToken(token)) {
+    if (EscrowLib.isOnChainToken(token) and not systemSettings.trustlessEscrowEnabled) {
       return #err(#escrow_error(
-        "Use initiateOnChainTrade for ICRC-1 tokens (ckUSDC/ckUSDT)"
+        "On-chain ck escrow is disabled pending Gate C sign-off"
       ));
     };
 
@@ -69,13 +182,32 @@ mixin (
       case (?b) b;
     };
     let priceUsdCents = PaymentsLib.tokenAmountToUsdCents(listing.priceAmount, listing.priceToken);
-    if (not Reputation.canTradeAmount(buyer.reputationScore, priceUsdCents)) {
-      return #err(#invalid_input(Reputation.gateError(buyer.reputationScore, priceUsdCents)));
+    if (not Reputation.canTradeAmountForUser(buyer.reputationScore, buyer.kycTier, priceUsdCents)) {
+      return #err(#invalid_input(Reputation.gateErrorForUser(buyer.reputationScore, buyer.kycTier, priceUsdCents)));
     };
-    // ───────────────────────────────────────────────────────────────────────
+    if (Reputation.isTradeBlocked(buyer)) {
+      return #err(#invalid_input(Reputation.tradeBlockedErrorUa(buyer, liabilityRecords)));
+    };
+    // Block seller with outstanding liability from receiving new trades
+    let sellerUser = switch (users.get(listing.seller)) {
+      case null return #err(#not_found);
+      case (?s) s;
+    };
+    if (Reputation.isTradeBlocked(sellerUser)) {
+      return #err(#invalid_input(Reputation.tradeBlockedErrorUa(sellerUser, liabilityRecords)));
+    };
+
+    let listingStakeAmount = switch (listingStakes.get(listingId)) {
+      case null 0;
+      case (?rec) rec.amount;
+    };
 
     let result = EscrowLib.initiateTrade(
-      trades, listings, nextTradeId.value, caller, listingId, token, shippingSelection
+      trades, listings, nextTradeId.value, caller, listingId, token, shippingSelection,
+      sellerUser.kycTier,
+      listingStakeAmount,
+      systemSettings.trustlessEscrowEnabled,
+      systemSettings.ckOnChainBetaCapUsdCents,
     );
     switch (result) {
       case (#ok(trade)) {
@@ -86,69 +218,76 @@ mixin (
     };
   };
 
-  // ─── Initiate On-Chain Trade (ICRC-1 path) ────────────────────────────────
+  // ─── Initiate On-Chain Trade (ICRC-1 path, post-handshake — E9.S2) ────────
 
-  /// Creates a new trade and immediately pulls tokens from the buyer into
-  /// canister escrow via icrc2_transfer_from (buyer must have called
-  /// icrc2_approve on the ledger canister first).
+  /// Locks ckUSDC/ckUSDT for an existing seller-confirmed trade via icrc2_transfer_from.
+  /// Buyer must have called icrc2_approve on the ledger first.
   ///
   /// Flow:
-  ///   1. Resolve ledger canister ID for the token
-  ///   2. Create trade record in #awaiting_approval
-  ///   3. Call icrc2_transfer_from — pulls amount from buyer to this canister
-  ///   4. Advance trade to #funded
-  ///
-  /// On any ledger error the trade record is removed and #err is returned.
+  ///   1. Gate C + PaymentIntent (ck path) + #payment_intent checks (sync)
+  ///   2. Advance trade to #awaiting_approval
+  ///   3. Call icrc2_transfer_from — pulls intent.exactAmount from buyer to this canister
+  ///   4. Success → #funded; ledger error → rollback to #payment_intent (no nextTradeId mutation)
   public shared ({ caller }) func initiateOnChainTrade(
-    listingId         : Types.ListingId,
-    token             : Types.TradeToken,
-    shippingSelection : ?Types.ShippingSelection,
+    tradeId : Types.TradeId,
   ) : async Types.Result<Types.TradeId> {
     AuthLib.assertNotAnonymous(caller);
-    // Rate limit: shared 5 trades per hour per principal
+    AuthLib.assertCallerNotBanned(users, caller);
+    if (not systemSettings.trustlessEscrowEnabled) {
+      let tradeRef = switch (trades.get(tradeId)) {
+        case null return #err(#not_found);
+        case (?t) t;
+      };
+      if (not EscrowLib.isInFlightCkLockEligible(tradeRef, false)) {
+        return #err(#escrow_error(
+          "On-chain escrow is disabled pending Gate C sign-off. Use initiateTrade for manual payment."
+        ));
+      };
+    };
     if (not RateLimiter.check(caller, 3_600_000_000_000, 5, rateLimitInitiateTrade)) {
       return #err(#rate_limited);
     };
 
-    let ledgerId = switch (EscrowLib.ledgerCanisterId(token, systemSettings.ckUsdcLedgerId, systemSettings.ckUsdtLedgerId)) {
+    let tradeRef = switch (trades.get(tradeId)) {
+      case null return #err(#not_found);
+      case (?t) t;
+    };
+
+    let ledgerId = switch (
+      EscrowLib.ledgerCanisterId(
+        tradeRef.token,
+        systemSettings.ckUsdcLedgerId,
+        systemSettings.ckUsdtLedgerId,
+      )
+    ) {
       case (?id) id;
       case null return #err(#escrow_error(
-        "Token does not support on-chain escrow; use initiateTrade instead"
+        "Token does not support on-chain escrow"
       ));
     };
 
-    // ─── Reputation gate (buyer) ────────────────────────────────────────────
-    let listing = switch (listings.get(listingId)) {
-      case null return #err(#not_found);
-      case (?l) l;
-    };
-    let buyer = switch (users.get(caller)) {
-      case null return #err(#not_found);
-      case (?b) b;
-    };
-    let priceUsdCents = PaymentsLib.tokenAmountToUsdCents(listing.priceAmount, listing.priceToken);
-    if (not Reputation.canTradeAmount(buyer.reputationScore, priceUsdCents)) {
-      return #err(#invalid_input(Reputation.gateError(buyer.reputationScore, priceUsdCents)));
-    };
-    // ───────────────────────────────────────────────────────────────────────
-
-    // Create the trade record
-    let createResult = EscrowLib.initiateOnChainTrade(
-      trades, listings, nextTradeId.value, caller, listingId, token, ledgerId, shippingSelection
+    let prepareResult = EscrowLib.prepareOnChainTradeLock(
+      trades, caller, tradeId, ledgerId, systemSettings.ckOnChainBetaCapUsdCents,
     );
-    let trade = switch (createResult) {
+    let trade = switch (prepareResult) {
       case (#ok(t)) t;
       case (#err(e)) return #err(e);
     };
-    let tradeId = trade.id;
-    nextTradeId.value += 1;
 
-    // Pull tokens from buyer into this canister via ICRC-2
+    if (trade.status == #funded) {
+      return #ok(tradeId);
+    };
+
+    let lockAmount = switch (trade.escrowAccount) {
+      case (?e) e.amount;
+      case null return #err(#escrow_error("Escrow account missing after lock prepare"));
+    };
+
     let ledger : EscrowLib.Icrc1Ledger = actor(ledgerId.toText());
     let transferResult = await ledger.icrc2_transfer_from({
       from    = { owner = caller; subaccount = null };
       to      = { owner = selfPrincipal.value; subaccount = null };
-      amount  = trade.amount;
+      amount  = lockAmount;
       fee     = null;
       memo    = null;
       spender_subaccount = null;
@@ -157,16 +296,26 @@ mixin (
 
     switch (transferResult) {
       case (#Ok(_blockIndex)) {
-        // Advance trade to #funded
         switch (EscrowLib.markFunded(trades, tradeId)) {
-          case (#ok(_)) #ok(tradeId);
-          case (#err(e)) #err(e);
+          case (#ok(_)) {};
+          case (#err(e)) return #err(e);
         };
+        switch (listings.get(trade.listing)) {
+          case (?listing) {
+            if (listing.isDigital) {
+              ignore DigitalDeliveryLib.tryAutoDeliver(
+                trades, listings, tradeId, selfPrincipal.value,
+              );
+            } else {
+              ignore EscrowLib.enterPhysicalFulfillmentAfterFunded(trades, listings, tradeId);
+            };
+          };
+          case null {};
+        };
+        #ok(tradeId);
       };
       case (#Err(tfErr)) {
-        // Roll back: remove the trade record
-        trades.remove(tradeId);
-        nextTradeId.value -= 1;
+        ignore EscrowLib.rollbackOnChainLockFailure(trades, tradeId);
         #err(#escrow_error("ICRC-2 transfer_from failed: " # debug_show(tfErr)))
       };
     };
@@ -175,15 +324,180 @@ mixin (
   // ─── Confirm Payment Sent (buyer) ─────────────────────────────────────────
 
   /// Buyer calls this to confirm they have sent the crypto payment off-chain.
-  /// Transitions: #pending / #funded → #buyer_confirmed.
+  /// Transitions: #payment_intent / #pending / #funded → #buyer_confirmed.
   public shared ({ caller }) func confirmPaymentSent(
     tradeId : Types.TradeId,
   ) : async Types.Result<()> {
     AuthLib.assertNotAnonymous(caller);
+    AuthLib.assertCallerNotBanned(users, caller);
     switch (EscrowLib.confirmPaymentSent(trades, caller, tradeId)) {
       case (#ok(_)) #ok(());
       case (#err(e)) #err(e);
     };
+  };
+
+  // ─── Seller handshake (E3.S7 / FR-21a) ────────────────────────────────────
+
+  /// Seller confirms an incoming buy request within the 24h handshake window.
+  /// Advances trade to #payment_intent (buyer may pay after this).
+  public shared ({ caller }) func confirmSellerHandshake(
+    tradeId : Types.TradeId,
+  ) : async Types.Result<()> {
+    AuthLib.assertNotAnonymous(caller);
+    AuthLib.assertCallerNotBanned(users, caller);
+    if (not RateLimiter.check(caller, 60_000_000_000, 20, rateLimitConfirmPayment)) {
+      return #err(#rate_limited);
+    };
+    switch (EscrowLib.confirmSellerHandshake(trades, caller, tradeId)) {
+      case (#ok(_)) #ok(());
+      case (#err(e)) #err(e);
+    };
+  };
+
+  /// Seller declines an incoming buy request → #cancelled_no_seller_response.
+  public shared ({ caller }) func declineSellerHandshake(
+    tradeId : Types.TradeId,
+  ) : async Types.Result<()> {
+    AuthLib.assertNotAnonymous(caller);
+    AuthLib.assertCallerNotBanned(users, caller);
+    if (not RateLimiter.check(caller, 60_000_000_000, 20, rateLimitConfirmPayment)) {
+      return #err(#rate_limited);
+    };
+    switch (EscrowLib.declineSellerHandshake(trades, caller, tradeId)) {
+      case (#ok(_)) #ok(());
+      case (#err(e)) #err(e);
+    };
+  };
+
+  /// Scans trades in #awaiting_seller_handshake and auto-cancels past deadline.
+  /// Callable by trade parties or admin (same pattern as digital inspection check).
+  public shared ({ caller }) func checkHandshakeTimeouts() : async Nat {
+    AuthLib.assertNotAnonymous(caller);
+    AuthLib.assertCallerNotBanned(users, caller);
+    let isAdminUser = switch (AuthLib.getUser(users, caller)) {
+      case (?u) AuthLib.isAdmin(u);
+      case null false;
+    };
+    if (not isAdminUser) {
+      let hasHandshakeTrade = trades.values().any(func(t : Types.Trade) : Bool {
+        t.status == #awaiting_seller_handshake and (
+          Principal.equal(caller, t.buyer) or Principal.equal(caller, t.seller)
+        )
+      });
+      if (not hasHandshakeTrade) {
+        return 0;
+      };
+    };
+    EscrowLib.checkHandshakeTimeouts(trades)
+  };
+
+  // ─── PaymentIntent (E3.S10 / FR-21b) ─────────────────────────────────────
+
+  /// Creates PaymentIntent after seller handshake; wires payout wallet snapshot (E4.S7).
+  /// Seller passes walletLinkId to snapshot; buyer may call when snapshot already exists.
+  public shared ({ caller }) func createPaymentIntent(
+    tradeId      : Types.TradeId,
+    walletLinkId : ?Nat,
+    path         : Types.PaymentSettlementPath,
+  ) : async Types.Result<Types.PaymentIntent> {
+    AuthLib.assertNotAnonymous(caller);
+    AuthLib.assertCallerNotBanned(users, caller);
+    if (not RateLimiter.check(caller, 60_000_000_000, 20, rateLimitConfirmPayment)) {
+      return #err(#rate_limited);
+    };
+    EscrowLib.createPaymentIntent(
+      trades,
+      users,
+      caller,
+      tradeId,
+      walletLinkId,
+      path,
+      systemSettings.platformFeeBps,
+      systemSettings.trustlessEscrowEnabled,
+      systemSettings.ckOnChainBetaCapUsdCents,
+    )
+  };
+
+  /// Expires stale PaymentIntents — late explorer verify stays fail-closed (E3.S10 AC 5).
+  public shared ({ caller }) func checkPaymentIntentExpiry() : async Nat {
+    AuthLib.assertNotAnonymous(caller);
+    AuthLib.assertCallerNotBanned(users, caller);
+    let isAdminUser = switch (AuthLib.getUser(users, caller)) {
+      case (?u) AuthLib.isAdmin(u);
+      case null false;
+    };
+    if (not isAdminUser) {
+      let hasIntentTrade = trades.values().any(func(t : Types.Trade) : Bool {
+        t.paymentIntent != null and (
+          Principal.equal(caller, t.buyer) or Principal.equal(caller, t.seller)
+        )
+      });
+      if (not hasIntentTrade) return 0;
+    };
+    EscrowLib.checkPaymentIntentExpiry(trades)
+  };
+
+  // ─── Buyer receipt confirm + fulfillment timers (E7.S3) ───────────────────
+
+  /// Buyer confirms physical goods received — completes before 48h NP grace.
+  public shared ({ caller }) func confirmBuyerReceipt(
+    tradeId : Types.TradeId,
+  ) : async Types.Result<()> {
+    AuthLib.assertNotAnonymous(caller);
+    AuthLib.assertCallerNotBanned(users, caller);
+    if (not RateLimiter.check(caller, 60_000_000_000, 10, rateLimitConfirmPayment)) {
+      return #err(#rate_limited);
+    };
+    switch (EscrowLib.confirmBuyerReceipt(trades, listings, users, caller, tradeId)) {
+      case (#err(e)) #err(e);
+      case (#ok(_)) {
+        switch (await afterTradeTransitionWithSettlement(tradeId, true)) {
+          case (#ok(_)) #ok(());
+          case (#err(e)) #err(e);
+        };
+      };
+    };
+  };
+
+  /// Scans ship-by SLA, NP delivered grace, digital inspection, and dispute L1 SLA.
+  public shared ({ caller }) func checkFulfillmentDeadlines() : async {
+    shipByEscalations : Nat;
+    autoCompletions : Nat;
+    digitalAutoCompletions : Nat;
+    disputeL1Escalations : Nat;
+  } {
+    AuthLib.assertNotAnonymous(caller);
+    AuthLib.assertCallerNotBanned(users, caller);
+    let user = switch (AuthLib.getUser(users, caller)) {
+      case (?u) u;
+      case null Runtime.trap("not registered");
+    };
+    if (not AuthLib.isAdmin(user) and not AuthLib.isModerator(user)) {
+      Runtime.trap("admin or moderator only");
+    };
+    let escalatedTradeIds = EscrowLib.checkShipByDeadlines(trades);
+    var shipByEscalations = 0;
+    for (tradeId in escalatedTradeIds.vals()) {
+      switch (DisputesLib.attachSystemShipBySlaDispute(disputes, trades, nextDisputeId.value, tradeId)) {
+        case (?_) {
+          nextDisputeId.value += 1;
+          shipByEscalations += 1;
+        };
+        case null {};
+      };
+    };
+    let npAutoCompletions = EscrowLib.processNpAutoComplete(trades, listings);
+    let digitalAutoCompletions = EscrowLib.processDigitalInspectionAutoComplete(trades, listings);
+    for (tradeId in OnChainSettlement.collectPendingTradeIds(trades).vals()) {
+      ignore await tryExecuteOnChainSettlement(tradeId);
+    };
+    let disputeL1Escalations = DisputesLib.processL1SlaEscalations(disputes, trades);
+    {
+      shipByEscalations;
+      autoCompletions = npAutoCompletions + digitalAutoCompletions;
+      digitalAutoCompletions;
+      disputeL1Escalations;
+    }
   };
 
   // ─── Confirm Payment Received / Release Funds (seller) ────────────────────
@@ -200,6 +514,7 @@ mixin (
     tradeId : Types.TradeId,
   ) : async Types.Result<()> {
     AuthLib.assertNotAnonymous(caller);
+    AuthLib.assertCallerNotBanned(users, caller);
 
     // Rate limit: 10 confirmations per minute per principal
     if (not RateLimiter.check(caller, 60_000_000_000, 10, rateLimitConfirmPayment)) {
@@ -221,188 +536,31 @@ mixin (
       case (?t) t;
     };
 
-    switch (EscrowLib.confirmPaymentReceived(trades, listings, caller, tradeId)) {
+    switch (EscrowLib.confirmPaymentReceived(trades, listings, users, caller, tradeId)) {
       case (#err(e)) {
         processingTrades.remove(tradeId);
         return #err(e);
       };
       case (#ok(completedTrade)) {
-        EscrowLib.applyReputationUpdate(users, completedTrade);
-
-        // ─── Digital delivery auto-reveal ──────────────────────────────────
-        // If the listing is digital and has a file URL, create the delivery record.
-        switch (listings.get(completedTrade.listing)) {
-          case null {};
-          case (?listing) {
-            if (listing.isDigital) {
-              // Resolve fileUrl: prefer encrypted field, fall back to plain text
-              let resolvedFileUrl : ?Text = switch (listing.digitalFileUrlEncrypted) {
-                case (?enc) {
-                  let salt = listing.id.toText();
-                  let key  = DigitalEncryption.deriveKey(selfPrincipal.value, salt);
-                  DigitalEncryption.decryptText(key, enc)
-                };
-                case null { listing.digitalFileUrl };
-              };
-              // Resolve password: prefer encrypted field, fall back to plain text
-              let resolvedPassword : ?Text = switch (listing.digitalPasswordEncrypted) {
-                case (?enc) {
-                  let salt = listing.id.toText();
-                  let key  = DigitalEncryption.deriveKey(selfPrincipal.value, salt);
-                  DigitalEncryption.decryptText(key, enc)
-                };
-                case null { listing.digitalPassword };
-              };
-              switch (resolvedFileUrl) {
-                case null {};
-                case (?fileUrl) {
-                  let now = Time.now();
-                  let delivery : Types.DigitalDelivery = {
-                    fileUrl;
-                    fileHash           = listing.digitalFileHash;
-                    password           = resolvedPassword;
-                    revealedAt         = ?now;
-                    inspectionDeadline = ?(now + INSPECTION_PERIOD_NS);
-                  };
-                  completedTrade.digitalDelivery := ?delivery;
-                };
-              };
-            };
-          };
-        };
-        // ─────────────────────────────────────────────────────────────────────
-
-        // ICRC-1 path: release funds
         switch (completedTrade.escrowAccount) {
-          case null {}; // manual path — done
-          case (?escrow) {
-            let ledger : EscrowLib.Icrc1Ledger = actor(escrow.ledgerCanisterId.toText());
-
-            // ─── Cross-collateral seizure ─────────────────────────────────
-            // If seller has a negative liability balance, seize up to
-            // min(liabilityOwed, sellerAmount) from escrow before releasing.
-            let baseSellerAmount = EscrowLib.sellerAmount(escrow.amount);
-
-            // Compute how many token units to seize based on liability
-            let seizeTokenUnits : Nat = switch (users.get(escrow.sellerPrincipal)) {
-              case null 0;
-              case (?seller) {
-                if (seller.liabilityBalance >= 0) {
-                  0  // no debt — release normally
-                } else {
-                  // liabilityBalance is negative; abs gives the USD-cent debt
-                  let liabilityOwedCents : Nat = Int.abs(seller.liabilityBalance);
-                  // Convert seller token amount to USD cents for comparison
-                  let sellerAmountCents = PaymentsLib.tokenAmountToUsdCents(
-                    baseSellerAmount, escrow.token
-                  );
-                  let seizeCents = Nat.min(liabilityOwedCents, sellerAmountCents);
-
-                  // Convert seize amount back to token units using same factor
-                  // tokenAmountToUsdCents = amount * 100 / divisor
-                  // → seizeTokenUnits = seizeCents * divisor / 100
-                  let tokenInfo = PaymentsLib.getTokenDisplayInfo(escrow.token);
-                  let divisor : Nat = switch (tokenInfo) {
-                    case null 1_000_000; // default 6 decimals
-                    case (?info) {
-                      var d : Nat = 1;
-                      var i = 0;
-                      while (i < info.decimals) { d := d * 10; i += 1 };
-                      d
-                    };
-                  };
-                  let seizeUnits = (seizeCents * divisor) / 100;
-
-                  // Reduce seller liability by seized USD cents (debt repayment)
-                  seller.liabilityBalance := seller.liabilityBalance + Int.fromNat(seizeCents);
-                  let seizureEvent : Types.LiabilityEvent = {
-                    amount    = Int.fromNat(seizeCents); // positive = debt reduction
-                    reason    = "cross_collateral_seizure";
-                    tradeId   = ?completedTrade.id;
-                    timestamp = Time.now();
-                  };
-                  seller.liabilityHistory := seller.liabilityHistory.concat([seizureEvent]);
-
-                  seizeUnits
-                };
-              };
-            };
-            // ─────────────────────────────────────────────────────────────
-
-            // Amount actually transferred to seller (after seizure)
-            let toSeller : Nat = if (seizeTokenUnits >= baseSellerAmount) 0
-                                 else baseSellerAmount - seizeTokenUnits : Nat;
-
-            // Seize to treasury if any
-            if (seizeTokenUnits > 0) {
-              let _seizureTransfer = await ledger.icrc1_transfer({
-                to      = { owner = treasuryId.value; subaccount = null };
-                amount  = seizeTokenUnits;
-                fee     = null;
-                memo    = ?"cross-collateral-seizure".encodeUtf8();
-                from_subaccount = null;
-                created_at_time = null;
-              });
-            };
-
-            let sellerTransfer : { #Ok : Nat; #Err : EscrowLib.TransferError } = if (toSeller == 0) {
-              #Ok(0) // nothing to transfer — all seized
-            } else {
-              await ledger.icrc1_transfer({
-                to      = { owner = escrow.sellerPrincipal; subaccount = null };
-                amount  = toSeller;
-                fee     = null;
-                memo    = null;
-                from_subaccount = null;
-                created_at_time = null;
-              })
-            };
-
-            // Transfer 2% platform profit to treasury (best-effort)
-            let _platformTransfer = await ledger.icrc1_transfer({
-              to      = { owner = treasuryId.value; subaccount = null };
-              amount  = EscrowLib.platformFee(escrow.amount);
-              fee     = null;
-              memo    = ?"platform-fee".encodeUtf8();
-              from_subaccount = null;
-              created_at_time = null;
-            });
-
-            // Transfer 0.5% cycles fee to treasury (best-effort)
-            let _cyclesTransfer = await ledger.icrc1_transfer({
-              to      = { owner = treasuryId.value; subaccount = null };
-              amount  = EscrowLib.cycleFee(escrow.amount);
-              fee     = null;
-              memo    = ?"cycles-fee".encodeUtf8();
-              from_subaccount = null;
-              created_at_time = null;
-            });
-
-            // Transfer 0.5% reserve fee to treasury (best-effort)
-            let _reserveTransfer = await ledger.icrc1_transfer({
-              to      = { owner = treasuryId.value; subaccount = null };
-              amount  = EscrowLib.reserveFee(escrow.amount);
-              fee     = null;
-              memo    = ?"reserve-fee".encodeUtf8();
-              from_subaccount = null;
-              created_at_time = null;
-            });
-
-            // Log seller transfer errors but do not revert the completed state
-            switch (sellerTransfer) {
-              case (#Ok(_)) {};
-              case (#Err(e)) {
-                // State is already #complete; funds remain in canister for manual recovery
+          case null {
+            EscrowLib.applyReputationUpdate(users, completedTrade);
+            processingTrades.remove(tradeId);
+            #ok(())
+          };
+          case (?_) {
+            switch (await afterTradeTransitionWithSettlement(tradeId, true)) {
+              case (#ok(_)) {
                 processingTrades.remove(tradeId);
-                Runtime.trap("seller transfer failed after trade completion: " # debug_show(e));
+                #ok(())
+              };
+              case (#err(e)) {
+                processingTrades.remove(tradeId);
+                #err(e)
               };
             };
-            // Fee transfer failures are non-fatal — treasury can reclaim later
           };
         };
-
-        processingTrades.remove(tradeId);
-        #ok(())
       };
     };
   };
@@ -416,6 +574,7 @@ mixin (
     tradeId : Types.TradeId,
   ) : async Types.Result<()> {
     AuthLib.assertNotAnonymous(caller);
+    AuthLib.assertCallerNotBanned(users, caller);
 
     // Reentrancy guard: prevent double-refund if called twice rapidly for the same trade
     switch (processingTrades.get(tradeId)) {
@@ -438,28 +597,78 @@ mixin (
         return #err(e);
       };
       case (#ok(refundedTrade)) {
-        // ICRC-1 path: return funds to buyer
         switch (refundedTrade.escrowAccount) {
           case null {
             processingTrades.remove(tradeId);
-            #ok(()) // manual path — done
+            #ok(())
           };
-          case (?escrow) {
-            let ledger : EscrowLib.Icrc1Ledger = actor(escrow.ledgerCanisterId.toText());
-            let refundResult = await ledger.icrc1_transfer({
-              to      = { owner = escrow.buyerPrincipal; subaccount = null };
-              amount  = escrow.amount;
-              fee     = null;
-              memo    = null;
-              from_subaccount = null;
-              created_at_time = null;
-            });
+          case (?_) {
+            switch (await afterTradeTransitionWithSettlement(tradeId, false)) {
+              case (#ok(_)) {
+                processingTrades.remove(tradeId);
+                #ok(())
+              };
+              case (#err(e)) {
+                processingTrades.remove(tradeId);
+                #err(e)
+              };
+            };
+          };
+        };
+      };
+    };
+  };
+
+  // ─── Buyer cancel before shipment (E3.S9 / FR-21c) ───────────────────────
+
+  /// Buyer unilateral cancel after payment verified and before shipment — 85/10/5 split.
+  public shared ({ caller }) func buyerCancelBeforeShipment(
+    tradeId : Types.TradeId,
+  ) : async Types.Result<Types.BuyerCancelPenaltySplit> {
+    AuthLib.assertNotAnonymous(caller);
+    AuthLib.assertCallerNotBanned(users, caller);
+    if (not RateLimiter.check(caller, 60_000_000_000, 10, rateLimitConfirmPayment)) {
+      return #err(#rate_limited);
+    };
+
+    switch (processingTrades.get(tradeId)) {
+      case (?true) { return #err(#escrow_error("Already processing")) };
+      case _ {};
+    };
+    processingTrades.add(tradeId, true);
+
+    let tradeSnap = switch (trades.get(tradeId)) {
+      case null {
+        processingTrades.remove(tradeId);
+        return #err(#not_found);
+      };
+      case (?t) t;
+    };
+
+    let result = EscrowLib.buyerCancelBeforeShipment(trades, caller, tradeId);
+    switch (result) {
+      case (#err(e)) {
+        processingTrades.remove(tradeId);
+        return #err(e);
+      };
+      case (#ok(split)) {
+        switch (tradeSnap.escrowAccount) {
+          case null {
+            if (split.sellerCompensation > 0) {
+              OnChainSettlement.sellerCompensationCredit(tradeSnap, users, split);
+            };
             processingTrades.remove(tradeId);
-            switch (refundResult) {
-              case (#Ok(_)) #ok(());
-              case (#Err(e)) {
-                // State is #refunded; funds remain in canister for manual recovery
-                Runtime.trap("buyer refund transfer failed: " # debug_show(e));
+            #ok(split)
+          };
+          case (?_) {
+            switch (await afterTradeTransitionWithSettlement(tradeId, false)) {
+              case (#ok(_)) {
+                processingTrades.remove(tradeId);
+                #ok(split)
+              };
+              case (#err(e)) {
+                processingTrades.remove(tradeId);
+                #err(e)
               };
             };
           };
@@ -477,6 +686,7 @@ mixin (
     tradeId : Types.TradeId,
   ) : async Types.Result<Bool> {
     AuthLib.assertNotAnonymous(caller);
+    AuthLib.assertCallerNotBanned(users, caller);
 
     let tradeSnap = switch (trades.get(tradeId)) {
       case null return #err(#not_found);
@@ -495,29 +705,32 @@ mixin (
               let priceUsdCents = PaymentsLib.tokenAmountToUsdCents(
                 tradeSnap.amount, tradeSnap.token
               );
-              let feeCents : Int = Int.fromNat((priceUsdCents * 5) / 100);
-              if (feeCents > 0) {
-                Reputation.recordLiability(seller, feeCents, "cancellation_fee", ?tradeSnap.id);
+              let feeCentsNat = (priceUsdCents * 5) / 100;
+              if (feeCentsNat > 0) {
+                ignore Reputation.createLiability(
+                  liabilityRecords,
+                  nextLiabilityId,
+                  seller,
+                  feeCentsNat,
+                  tradeSnap.token,
+                  #cancellation_fee,
+                  caller,
+                  ?tradeSnap.id,
+                );
               };
             };
           };
         };
 
-        // Refund ICRC-1 funds if any were locked
+        // Refund ICRC-1 funds if any were locked. EscrowLib queued the refund;
+        // execute through the settlement path so ledger failure leaves a
+        // retryable pending settlement instead of a silently cancelled trade.
         switch (tradeSnap.escrowAccount) {
           case null {}; // manual path — no on-chain funds
-          case (?escrow) {
-            // Only refund if tokens were actually locked (trade was #funded)
-            if (tradeSnap.status == #funded or tradeSnap.status == #buyer_confirmed) {
-              let ledger : EscrowLib.Icrc1Ledger = actor(escrow.ledgerCanisterId.toText());
-              let _ = await ledger.icrc1_transfer({
-                to      = { owner = escrow.buyerPrincipal; subaccount = null };
-                amount  = escrow.amount;
-                fee     = null;
-                memo    = null;
-                from_subaccount = null;
-                created_at_time = null;
-              });
+          case (?_) {
+            switch (await afterTradeTransitionWithSettlement(tradeId, false)) {
+              case (#ok(_)) {};
+              case (#err(e)) return #err(e);
             };
           };
         };
@@ -534,6 +747,7 @@ mixin (
   /// Should be called periodically. Admin-only.
   public shared ({ caller }) func checkAndExpireTimeouts() : async Nat {
     AuthLib.assertNotAnonymous(caller);
+    AuthLib.assertCallerNotBanned(users, caller);
     let user = switch (AuthLib.getUser(users, caller)) {
       case (?u) u;
       case null Runtime.trap("not registered");
@@ -544,27 +758,8 @@ mixin (
 
     let (count, onChainIds) = EscrowLib.checkAndExpireTimeouts(trades);
 
-    // Process on-chain refunds for expired ICRC-1 trades
     for (tradeId in onChainIds.vals()) {
-      switch (trades.get(tradeId)) {
-        case null {};
-        case (?trade) {
-          switch (trade.escrowAccount) {
-            case null {};
-            case (?escrow) {
-              let ledger : EscrowLib.Icrc1Ledger = actor(escrow.ledgerCanisterId.toText());
-              let _ = await ledger.icrc1_transfer({
-                to      = { owner = escrow.buyerPrincipal; subaccount = null };
-                amount  = escrow.amount;
-                fee     = null;
-                memo    = null;
-                from_subaccount = null;
-                created_at_time = null;
-              });
-            };
-          };
-        };
-      };
+      ignore await tryExecuteOnChainSettlement(tradeId);
     };
 
     count
@@ -590,6 +785,7 @@ mixin (
     outcome   : Types.ResolutionOutcome,
   ) : async Types.Result<()> {
     AuthLib.assertNotAnonymous(caller);
+    AuthLib.assertCallerNotBanned(users, caller);
 
     // Only admins, moderators, or the canister itself (system-resolved by jury) may call this.
     let isSystem = Principal.equal(caller, selfPrincipal.value);
@@ -598,11 +794,7 @@ mixin (
         case null return #err(#unauthorized);
         case (?u) u;
       };
-      let isMod = switch (user.role) {
-        case (#moderator or #admin) true;
-        case _ false;
-      };
-      if (not isMod) return #err(#unauthorized);
+      if (not AuthLib.canActAsModerator(user)) return #err(#unauthorized);
     };
 
     let dispute = switch (disputes.get(disputeId)) {
@@ -620,195 +812,107 @@ mixin (
       case (?t) t;
     };
 
-    // If trade already settled (not #disputed), do nothing idempotently
-    if (trade.status != #disputed) {
+    // Idempotent: terminal status with no pending on-chain work means settlement finished.
+    if (not DisputesLib.isDisputeFrozenTradeStatus(trade.status)
+      and not OnChainSettlement.hasPending(trade)) {
       return #ok(());
     };
 
-    // Check if seller has negative reputation (cross-collateral seizure applies)
+    // Cross-collateral seizure when seller owes platform (same check as releaseToSeller).
     let sellerHasNegativeRep : Bool = switch (users.get(trade.seller)) {
       case null false;
-      case (?u) u.reputationScore < 0;
+      case (?u) Reputation.isLiabilityNegative(u);
     };
 
-    // Update trade status based on outcome
-    switch (outcome) {
-      case (#buyer_wins)  { trade.status := #refunded };
-      case (#seller_wins) { trade.status := if (sellerHasNegativeRep) #refunded else #complete };
-      case (#split)       { trade.status := #complete };
+    let targetStatus : Types.TradeStatus = switch (outcome) {
+      case (#buyer_wins) #refunded;
+      case (#seller_wins) if (sellerHasNegativeRep) #refunded else #complete;
+      case (#split) #complete;
     };
 
     // Manual (off-chain) trades: state update is sufficient, no on-chain transfer
-    let escrow = switch (trade.escrowAccount) {
-      case null return #ok(());
-      case (?e) e;
-    };
-
-    let ledger : EscrowLib.Icrc1Ledger = actor(escrow.ledgerCanisterId.toText());
-
-    switch (outcome) {
-      // ── Buyer wins: full refund to buyer ─────────────────────────────────
-      case (#buyer_wins) {
-        let refundResult = await ledger.icrc1_transfer({
-          to      = { owner = escrow.buyerPrincipal; subaccount = null };
-          amount  = escrow.amount;
-          fee     = null;
-          memo    = ?"dispute-buyer-wins".encodeUtf8();
-          from_subaccount = null;
-          created_at_time = null;
-        });
-        switch (refundResult) {
-          case (#Ok(_)) {};
-          case (#Err(e)) {
-            Runtime.trap("dispute buyer refund failed: " # debug_show(e));
-          };
-        };
-      };
-
-      // ── Seller wins: release to seller (minus 3% fee), or seize if negative rep ─
-      case (#seller_wins) {
-        if (sellerHasNegativeRep) {
-          // Cross-collateral seizure: redirect seller's portion to treasury
-          let seizedAmount = EscrowLib.sellerAmount(escrow.amount);
-          let _seizure = await ledger.icrc1_transfer({
-            to      = { owner = treasuryId.value; subaccount = null };
-            amount  = seizedAmount;
-            fee     = null;
-            memo    = ?"cross-collateral-seizure".encodeUtf8();
-            from_subaccount = null;
-            created_at_time = null;
-          });
-          // Document the seizure in dispute notes (moderatorNotes)
-          let note = "[SYSTEM] Cross-collateral seizure: seller portion (" #
-            debug_show(seizedAmount) # " e8s) redirected to treasury due to negative reputation.";
-          dispute.moderatorNotes := dispute.moderatorNotes.concat([note]);
-        } else {
-          // Normal seller release
-          let toSeller = EscrowLib.sellerAmount(escrow.amount);
-          let sellerResult = await ledger.icrc1_transfer({
-            to      = { owner = escrow.sellerPrincipal; subaccount = null };
-            amount  = toSeller;
-            fee     = null;
-            memo    = ?"dispute-seller-wins".encodeUtf8();
-            from_subaccount = null;
-            created_at_time = null;
-          });
-          switch (sellerResult) {
-            case (#Ok(_)) {};
-            case (#Err(e)) {
-              Runtime.trap("dispute seller release failed: " # debug_show(e));
+    switch (trade.escrowAccount) {
+      case null {
+        trade.status := targetStatus;
+        if (targetStatus == #complete) {
+          trade.completedAt := ?Types.now();
+          switch (listings.get(trade.listing)) {
+            case (?l) {
+              l.status := #sold;
+              l.resolvedAt := ?Types.now();
             };
+            case null {};
           };
         };
-
-        // Platform fees always go to treasury regardless of seizure
-        let _pf = await ledger.icrc1_transfer({
-          to      = { owner = treasuryId.value; subaccount = null };
-          amount  = EscrowLib.platformFee(escrow.amount);
-          fee     = null;
-          memo    = ?"platform-fee".encodeUtf8();
-          from_subaccount = null;
-          created_at_time = null;
-        });
-        let _cf = await ledger.icrc1_transfer({
-          to      = { owner = treasuryId.value; subaccount = null };
-          amount  = EscrowLib.cycleFee(escrow.amount);
-          fee     = null;
-          memo    = ?"cycles-fee".encodeUtf8();
-          from_subaccount = null;
-          created_at_time = null;
-        });
-        let _rf = await ledger.icrc1_transfer({
-          to      = { owner = treasuryId.value; subaccount = null };
-          amount  = EscrowLib.reserveFee(escrow.amount);
-          fee     = null;
-          memo    = ?"reserve-fee".encodeUtf8();
-          from_subaccount = null;
-          created_at_time = null;
-        });
+        return #ok(());
       };
-
-      // ── Split 50/50: buyer gets half, seller gets half minus proportional fee ─
-      case (#split) {
-        let halfAmount = escrow.amount / 2;
-        // Buyer receives their clean half
-        let buyerResult = await ledger.icrc1_transfer({
-          to      = { owner = escrow.buyerPrincipal; subaccount = null };
-          amount  = halfAmount;
-          fee     = null;
-          memo    = ?"dispute-split-buyer".encodeUtf8();
-          from_subaccount = null;
-          created_at_time = null;
-        });
-        switch (buyerResult) {
-          case (#Ok(_)) {};
-          case (#Err(e)) {
-            Runtime.trap("dispute split buyer transfer failed: " # debug_show(e));
-          };
+      case (?escrow) {
+        if (OnChainSettlement.hasPending(trade)) {
+          return #err(#escrow_error("On-chain settlement already pending — retry or wait"));
         };
-
-        // Seller receives their half minus 3% proportional fee on the full amount
-        let sellerHalf = EscrowLib.sellerAmount(halfAmount);
-
-        if (sellerHasNegativeRep) {
-          // Cross-collateral seizure: seize seller's half to treasury
-          let _seizure = await ledger.icrc1_transfer({
-            to      = { owner = treasuryId.value; subaccount = null };
-            amount  = sellerHalf;
-            fee     = null;
-            memo    = ?"cross-collateral-seizure-split".encodeUtf8();
-            from_subaccount = null;
-            created_at_time = null;
-          });
-          let note = "[SYSTEM] Cross-collateral seizure (split): seller half (" #
-            debug_show(sellerHalf) # " e8s) redirected to treasury due to negative reputation.";
-          dispute.moderatorNotes := dispute.moderatorNotes.concat([note]);
-        } else {
-          let sellerResult = await ledger.icrc1_transfer({
-            to      = { owner = escrow.sellerPrincipal; subaccount = null };
-            amount  = sellerHalf;
-            fee     = null;
-            memo    = ?"dispute-split-seller".encodeUtf8();
-            from_subaccount = null;
-            created_at_time = null;
-          });
-          switch (sellerResult) {
-            case (#Ok(_)) {};
-            case (#Err(e)) {
-              Runtime.trap("dispute split seller transfer failed: " # debug_show(e));
+        let op : Types.OnChainSettlementOp = switch (outcome) {
+          case (#buyer_wins) #disputeBuyerWins;
+          case (#seller_wins) #disputeSellerWins { sellerHasNegativeRep };
+          case (#split) #disputeSplit { sellerHasNegativeRep };
+        };
+        OnChainSettlement.queue(trade, op, targetStatus);
+        switch (await tryExecuteOnChainSettlement(trade.id)) {
+          case (#ok(true)) {
+            if (targetStatus == #complete) {
+              EscrowLib.applyReputationUpdate(users, trade);
             };
+            #ok(())
           };
+          case (#ok(false)) #err(#escrow_error("dispute settlement was not queued"));
+          case (#err(e)) #err(e);
         };
-
-        // Fee transfers (best-effort) based on full amount
-        let _pf = await ledger.icrc1_transfer({
-          to      = { owner = treasuryId.value; subaccount = null };
-          amount  = EscrowLib.platformFee(escrow.amount);
-          fee     = null;
-          memo    = ?"platform-fee".encodeUtf8();
-          from_subaccount = null;
-          created_at_time = null;
-        });
-        let _cf = await ledger.icrc1_transfer({
-          to      = { owner = treasuryId.value; subaccount = null };
-          amount  = EscrowLib.cycleFee(escrow.amount);
-          fee     = null;
-          memo    = ?"cycles-fee".encodeUtf8();
-          from_subaccount = null;
-          created_at_time = null;
-        });
-        let _rf = await ledger.icrc1_transfer({
-          to      = { owner = treasuryId.value; subaccount = null };
-          amount  = EscrowLib.reserveFee(escrow.amount);
-          fee     = null;
-          memo    = ?"reserve-fee".encodeUtf8();
-          from_subaccount = null;
-          created_at_time = null;
-        });
       };
     };
+  };
 
-    #ok(())
+  /// Retries all pending on-chain settlements (admin/system job — E9.S3 AC 3).
+  public shared ({ caller }) func retryPendingOnChainSettlements() : async {
+    attempted : Nat;
+    succeeded : Nat;
+    failed : Nat;
+  } {
+    AuthLib.assertNotAnonymous(caller);
+    AuthLib.assertCallerNotBanned(users, caller);
+    let user = switch (users.get(caller)) {
+      case null return { attempted = 0; succeeded = 0; failed = 0 };
+      case (?u) u;
+    };
+    let isAdminUser = switch (user.role) {
+      case (#admin) true;
+      case _ false;
+    };
+    if (not isAdminUser) {
+      Runtime.trap("admin only");
+    };
+
+    let ids = OnChainSettlement.collectPendingTradeIds(trades);
+    var attempted = 0;
+    var succeeded = 0;
+    var failed = 0;
+    for (tradeId in ids.vals()) {
+      attempted += 1;
+      switch (await tryExecuteOnChainSettlement(tradeId)) {
+        case (#ok(true)) {
+          succeeded += 1;
+          switch (trades.get(tradeId)) {
+            case (?t) {
+              if (t.status == #complete) {
+                EscrowLib.applyReputationUpdate(users, t);
+              };
+            };
+            case null {};
+          };
+        };
+        case (#ok(false)) { failed += 1 };
+        case (#err(_)) { failed += 1 };
+      };
+    };
+    { attempted; succeeded; failed }
   };
 
   // ─── Queries ──────────────────────────────────────────────────────────────
@@ -838,11 +942,29 @@ mixin (
     EscrowLib.getMyTrades(trades, caller, role)
   };
 
-  /// Returns all trades for a given listing.
-  public shared query func getTradesByListing(
+  /// Returns trades for a listing visible to caller (listing seller, trade party, or admin).
+  public shared query ({ caller }) func getTradesByListing(
     listingId : Types.ListingId,
   ) : async [Types.TradeView] {
-    EscrowLib.getTradesByListing(trades, listingId)
+    if (caller.isAnonymous()) return [];
+    let allForListing = EscrowLib.getTradesByListing(trades, listingId);
+    let isListingSeller = switch (listings.get(listingId)) {
+      case (?l) Principal.equal(caller, l.seller);
+      case null false;
+    };
+    let isAdminUser = switch (AuthLib.getUser(users, caller)) {
+      case (?u) AuthLib.isAdmin(u);
+      case null false;
+    };
+    if (isAdminUser or isListingSeller) {
+      allForListing
+    } else {
+      allForListing.filter(
+        func(t : Types.TradeView) : Bool {
+          Principal.equal(caller, t.buyer) or Principal.equal(caller, t.seller)
+        },
+      )
+    }
   };
 
   /// Returns all trades. Admin only.
@@ -860,7 +982,16 @@ mixin (
   /// Returns the liability balance for a seller (in USD cents).
   /// Negative values mean the seller owes money to the platform.
   /// Returns #err(#not_found) if the user is not registered.
-  public shared query func getSellerLiability(p : Principal) : async Types.Result<Int> {
+  public shared query ({ caller }) func getSellerLiability(p : Principal) : async Types.Result<Int> {
+    if (caller.isAnonymous()) return #err(#unauthorized);
+    let isSelf = Principal.equal(caller, p);
+    let isAdminUser = switch (AuthLib.getUser(users, caller)) {
+      case (?u) AuthLib.isAdmin(u);
+      case null false;
+    };
+    if (not (isSelf or isAdminUser)) {
+      return #err(#unauthorized);
+    };
     switch (users.get(p)) {
       case null  #err(#not_found);
       case (?u)  #ok(u.liabilityBalance);
@@ -869,76 +1000,16 @@ mixin (
 
   // ─── verifyTradePayment (Phase 2 — off-chain verification) ───────────────
 
-  /// Submits a blockchain transaction hash for automated payment verification.
-  /// Callable by the buyer of the trade only. Advances trade state from
-  /// #buyer_confirmed → #payment_verified on success.
-  ///
-  /// network accepts: "TRC20", "BEP20", "SPL", "ERC20", "POLYGON", "AVAX"
+  /// **Deprecated spoof path removed (E3.S10 / D-011).** Use verifyPayment instead.
   public shared ({ caller }) func verifyTradePayment(
     tradeId : Types.TradeId,
     txHash  : Text,
     network : Text,
   ) : async Types.Result<Types.PaymentVerificationResult> {
     AuthLib.assertNotAnonymous(caller);
-
-    // Map network string to TradeToken variant
-    let token : ?Types.TradeToken = switch (network) {
-      case ("TRC20"   or "USDT_TRC20")   ?#USDT_TRC20;
-      case ("BEP20"   or "USDT_BEP20")   ?#USDT_BEP20;
-      case ("SPL"     or "USDC_SPL")     ?#USDC_SPL;
-      case ("ERC20"   or "USDT_ERC20")   ?#USDT_ERC20;
-      case ("ERC20U"  or "USDC_ERC20")   ?#USDC_ERC20;
-      case ("POLYGON" or "USDT_POLYGON") ?#USDT_POLYGON;
-      case ("POLYGONU"or "USDC_POLYGON") ?#USDC_POLYGON;
-      case ("AVAX"    or "USDT_AVAX")    ?#USDT_AVAX;
-      case ("AVAXU"   or "USDC_AVAX")    ?#USDC_AVAX;
-      case _                              null;
-    };
-
-    switch (token) {
-      case null {
-        #err(#invalid_input("Unsupported network: " # network
-          # ". Supported: TRC20, BEP20, SPL, ERC20, POLYGON, AVAX"))
-      };
-      case (?_tok) {
-        let trade = switch (trades.get(tradeId)) {
-          case null    return #err(#not_found);
-          case (?t)    t;
-        };
-        if (not Principal.equal(caller, trade.buyer)) {
-          return #err(#unauthorized);
-        };
-        switch (trade.status) {
-          case (#buyer_confirmed or #payment_verified) {};
-          case (_) return #err(#escrow_error(
-            "verifyTradePayment requires #buyer_confirmed or #payment_verified, got "
-              # debug_show(trade.status)
-          ));
-        };
-        switch (EscrowLib.applyPaymentVerified(trades, tradeId)) {
-          case (#err(e)) #err(e);
-          case (#ok(_))  #ok({
-            status             = #verified;
-            txHash;
-            confirmedAmount    = 0.0;
-            confirmedRecipient = "";
-            blockNumber        = 0;
-            errorReason        = null;
-          });
-        }
-      };
-    }
-  };
-
-  // ─── Digital Delivery ─────────────────────────────────────────────────────
-
-  /// Returns the digital delivery record for a completed digital trade.
-  /// Only the buyer of the trade may call this.
-  /// Returns #not_found if the trade is not digital or not yet completed.
-  public shared ({ caller }) func getDigitalDelivery(
-    tradeId : Types.TradeId,
-  ) : async Types.Result<Types.DigitalDelivery> {
-    AuthLib.assertNotAnonymous(caller);
+    AuthLib.assertCallerNotBanned(users, caller);
+    ignore txHash;
+    ignore network;
     let trade = switch (trades.get(tradeId)) {
       case null return #err(#not_found);
       case (?t) t;
@@ -946,21 +1017,48 @@ mixin (
     if (not Principal.equal(caller, trade.buyer)) {
       return #err(#unauthorized);
     };
+    #err(#escrow_error(
+      "verifyTradePayment is disabled — use verifyPayment for explorer-verified settlement"
+    ))
+  };
+
+  // ─── Digital Delivery ─────────────────────────────────────────────────────
+
+  /// Returns the digital delivery record after auto-delivery (E2.S11).
+  /// Only the buyer may call; rejected before funding completes.
+  public shared ({ caller }) func getDigitalDelivery(
+    tradeId : Types.TradeId,
+  ) : async Types.Result<Types.DigitalDeliveryView> {
+    AuthLib.assertNotAnonymous(caller);
+    AuthLib.assertCallerNotBanned(users, caller);
+    let trade = switch (trades.get(tradeId)) {
+      case null return #err(#not_found);
+      case (?t) t;
+    };
+    if (not Principal.equal(caller, trade.buyer)) {
+      return #err(#unauthorized);
+    };
+    switch (DigitalDeliveryLib.assertDigitalDownloadAllowed(trade)) {
+      case (#err(e)) return #err(e);
+      case (#ok(_)) {};
+    };
     switch (trade.digitalDelivery) {
       case null  #err(#not_found);
-      case (?dd) #ok(dd);
+      case (?dd) {
+        DigitalDeliveryLib.touchRedownload(dd, Types.now());
+        #ok(EscrowLib.toDigitalDeliveryViewForBuyer(dd))
+      };
     }
   };
 
-  /// Buyer opens a digital dispute within the 24-hour inspection period.
-  /// Allowed only when digitalDelivery exists, status is #complete, and
-  /// the inspection deadline has not yet passed.
-  /// Freezes the escrow by transitioning trade status to #disputed.
+  /// Buyer opens a digital dispute within the 24-hour inspection period (E6.S9).
+  /// Delegates to unified playbook openDispute with digital evidence pack.
   public shared ({ caller }) func openDigitalDispute(
     tradeId : Types.TradeId,
     reason  : Text,
   ) : async Types.Result<Types.DisputeId> {
     AuthLib.assertNotAnonymous(caller);
+    AuthLib.assertCallerNotBanned(users, caller);
 
     let trade = switch (trades.get(tradeId)) {
       case null return #err(#not_found);
@@ -976,59 +1074,62 @@ mixin (
       case (?dd) dd;
     };
 
-    // Must still be in the inspection window
-    let deadline = switch (delivery.inspectionDeadline) {
-      case null return #err(#invalid_input("No inspection deadline set"));
-      case (?d) d;
-    };
-    let now = Time.now();
+    let deadline = DigitalDeliveryLib.ensureInspectionDeadline(delivery);
+    let now = Types.now();
     if (now > deadline) {
       return #err(#invalid_input("Inspection period expired"));
     };
 
-    // Trade must still be #complete (not already disputed/resolved)
-    if (trade.status != #complete) {
-      return #err(#escrow_error("trade is not in #complete state: " # debug_show(trade.status)));
+    if (trade.status != #digital_delivered) {
+      return #err(#escrow_error("trade is not in digital inspection state: " # debug_show(trade.status)));
     };
 
-    // Map reason text to DisputeReason variant
     let disputeReason : Types.DisputeReason = if (reason == "item_differs") #item_differs else #other;
-
-    // Create dispute record
-    let disputeId = nextDisputeId.value;
-    let description = "Digital goods dispute: " # reason;
-    let dispute : Types.Dispute = {
-      id                   = disputeId;
-      trade                = tradeId;
-      initiator            = caller;
-      reason               = disputeReason;
-      var description      = description;
-      var evidenceUrls          = [];
-      var evidenceAttachments   = [];
-      var status                = #opened;
-      var resolution            = null;
-      createdAt                 = now;
-      var resolvedAt            = null;
-      var moderatorNotes        = [];
+    let downloadTs = switch (delivery.revealedAt) {
+      case (?t) t;
+      case null now;
     };
-    disputes.add(disputeId, dispute);
-    nextDisputeId.value += 1;
+    let evidencePack : Types.DisputeEvidencePack = {
+      ttnScreenshotUrl  = null;
+      packagePhotoUrls  = [];
+      chatThreadLink    = null;
+      fileHash          = delivery.fileHash;
+      downloadTimestamp = downloadTs;
+    };
 
-    // Freeze escrow
-    trade.status := #disputed;
-
-    #ok(disputeId)
+    let result = DisputesLib.openDispute(
+      disputes,
+      trades,
+      nextDisputeId.value,
+      caller,
+      tradeId,
+      disputeReason,
+      "Digital goods dispute: " # reason,
+      evidencePack,
+      [],
+    );
+    switch (result) {
+      case (#ok _) { nextDisputeId.value += 1 };
+      case (#err(#invalid_input(_))) {
+        if (disputes.containsKey(nextDisputeId.value)) {
+          nextDisputeId.value += 1;
+        };
+      };
+      case (#err(_)) {};
+    };
+    result
   };
 
   /// Checks if the 24-hour inspection period has expired for a digital trade.
-  /// If so, and no dispute was opened, automatically releases funds to the seller
-  /// (for ICRC-1 trades) or marks the trade as funds-released (manual trades).
-  /// Returns #ok(true) if funds were released, #ok(false) if not yet expired or already handled.
+  /// If so, and no dispute was opened, marks trade #complete (manual) or releases
+  /// ICRC-1 escrow to seller. Dispute wins over auto-complete (E7.S2 AC 7).
+  /// Returns #ok(true) if trade was completed, #ok(false) if not yet expired or already handled.
   /// Callable by buyer or seller.
   public shared ({ caller }) func checkDigitalInspectionDeadline(
     tradeId : Types.TradeId,
   ) : async Types.Result<Bool> {
     AuthLib.assertNotAnonymous(caller);
+    AuthLib.assertCallerNotBanned(users, caller);
 
     let trade = switch (trades.get(tradeId)) {
       case null return #err(#not_found);
@@ -1039,75 +1140,48 @@ mixin (
     let isParty = Principal.equal(caller, trade.buyer) or Principal.equal(caller, trade.seller);
     if (not isParty) return #err(#unauthorized);
 
-    // Must be in #complete state (not disputed/already released)
-    if (trade.status != #complete) return #ok(false);
-
-    let delivery = switch (trade.digitalDelivery) {
-      case null return #ok(false);  // not a digital trade
-      case (?dd) dd;
+    if (trade.status != #digital_delivered) {
+      return #ok(false);
     };
-
-    let deadline = switch (delivery.inspectionDeadline) {
+    switch (trade.digitalDelivery) {
       case null return #ok(false);
-      case (?d) d;
+      case (?delivery) {
+        let now = Types.now();
+        let deadline = DigitalDeliveryLib.ensureInspectionDeadline(delivery);
+        if (now <= deadline) return #ok(false);
+      };
     };
 
-    let now = Time.now();
-    if (now <= deadline) return #ok(false);  // still within inspection window
-
-    // Inspection period expired, no dispute was opened → release funds
-    // For ICRC-1 trades, perform the on-chain transfer to seller
-    switch (trade.escrowAccount) {
-      case null {
-        // Manual trade — no on-chain action needed; funds already confirmed off-chain
-        #ok(true)
-      };
-      case (?escrow) {
-        let ledger : EscrowLib.Icrc1Ledger = actor(escrow.ledgerCanisterId.toText());
-
-        // Transfer (amount - 3% fee) to seller
-        let toSeller = EscrowLib.sellerAmount(escrow.amount);
-        let sellerTransfer = await ledger.icrc1_transfer({
-          to      = { owner = escrow.sellerPrincipal; subaccount = null };
-          amount  = toSeller;
-          fee     = null;
-          memo    = ?"digital-release".encodeUtf8();
-          from_subaccount = null;
-          created_at_time = null;
-        });
-
-        // Platform fee transfers (best-effort)
-        let _platformTransfer = await ledger.icrc1_transfer({
-          to      = { owner = treasuryId.value; subaccount = null };
-          amount  = EscrowLib.platformFee(escrow.amount);
-          fee     = null;
-          memo    = ?"platform-fee".encodeUtf8();
-          from_subaccount = null;
-          created_at_time = null;
-        });
-        let _cyclesTransfer = await ledger.icrc1_transfer({
-          to      = { owner = treasuryId.value; subaccount = null };
-          amount  = EscrowLib.cycleFee(escrow.amount);
-          fee     = null;
-          memo    = ?"cycles-fee".encodeUtf8();
-          from_subaccount = null;
-          created_at_time = null;
-        });
-        let _reserveTransfer = await ledger.icrc1_transfer({
-          to      = { owner = treasuryId.value; subaccount = null };
-          amount  = EscrowLib.reserveFee(escrow.amount);
-          fee     = null;
-          memo    = ?"reserve-fee".encodeUtf8();
-          from_subaccount = null;
-          created_at_time = null;
-        });
-
-        switch (sellerTransfer) {
-          case (#Ok(_)) #ok(true);
-          case (#Err(e)) {
-            Runtime.trap("digital inspection release failed: " # debug_show(e));
-          };
+    // ICRC-1 trades: queue release then execute before marking complete (E9.S3)
+    switch (EscrowLib.tryAutoCompleteDigitalInspection(trades, listings, tradeId)) {
+      case (#err(e)) return #err(e);
+      case (#ok(false)) return #ok(false);
+      case (#ok(true)) {
+        switch (await afterTradeTransitionWithSettlement(tradeId, true)) {
+          case (#err(e)) #err(e);
+          case (#ok(_)) #ok(true);
         };
+      };
+    }
+  };
+
+  // ─── Fee quote (E3.S8 / FR-12) ───────────────────────────────────────────
+
+  /// Effective platform fee in basis points (100 bps = 1%). Unset config → 300 (3%).
+  public query func platformFeeBps() : async Nat {
+    Admin.effectivePlatformFeeBps(systemSettings.platformFeeBps)
+  };
+
+  /// Buyer-facing fee breakdown for a listing before trade commit.
+  public query func getTradeFeeQuote(listingId : Types.ListingId) : async ?Types.TradeFeeQuote {
+    switch (listings.get(listingId)) {
+      case null null;
+      case (?listing) {
+        ?EscrowLib.buildTradeFeeQuote(
+          listing.priceAmount,
+          listing.priceToken,
+          systemSettings.platformFeeBps,
+        )
       };
     };
   };

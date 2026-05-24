@@ -1,0 +1,8 @@
+# BMAD BMM module config — CryptoMarket P2P
+project_name: CryptoMarket P2P
+user_name: owner
+communication_language: uk
+document_output_language: en
+user_skill_level: intermediate
+planning_artifacts: _bmad-output/planning-artifacts
+implementation_artifacts: _bmad-output/implementation-artifacts

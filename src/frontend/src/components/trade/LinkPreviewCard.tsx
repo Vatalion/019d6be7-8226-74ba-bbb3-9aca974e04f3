@@ -1,6 +1,7 @@
 import type { LinkPreview } from "@/backend.d";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBackend } from "@/hooks/useBackend";
+import { safeHttpUrl } from "@/utils/safeUrl";
 import { ExternalLink } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -13,14 +14,19 @@ export function LinkPreviewCard({ url }: LinkPreviewCardProps) {
   const [preview, setPreview] = useState<LinkPreview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const safeUrl = safeHttpUrl(url);
 
   useEffect(() => {
-    if (!actor || isFetching) return;
+    if (!actor || isFetching || !safeUrl) {
+      setLoading(false);
+      setError(!safeUrl);
+      return;
+    }
     setLoading(true);
     setError(false);
 
     actor
-      .getLinkPreview(url)
+      .getLinkPreview(safeUrl)
       .then((res) => {
         if (res.__kind__ === "ok" && res.ok.title) {
           setPreview(res.ok);
@@ -30,7 +36,9 @@ export function LinkPreviewCard({ url }: LinkPreviewCardProps) {
       })
       .catch(() => setError(true))
       .finally(() => setLoading(false));
-  }, [url, actor, isFetching]);
+  }, [safeUrl, actor, isFetching]);
+
+  if (!safeUrl) return null;
 
   if (loading) {
     return (
@@ -53,11 +61,11 @@ export function LinkPreviewCard({ url }: LinkPreviewCardProps) {
   const title = preview.title ?? "";
   const description = preview.description ?? "";
   const siteName = preview.siteName ?? "";
-  const imageUrl = preview.imageUrl ?? "";
+  const imageUrl = preview.imageUrl ? safeHttpUrl(preview.imageUrl) : undefined;
 
   return (
     <a
-      href={url}
+      href={safeUrl}
       target="_blank"
       rel="noopener noreferrer"
       className="mt-1.5 flex gap-2.5 p-2.5 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors group block"

@@ -3,8 +3,9 @@ import List "mo:core/List";
 import Time "mo:core/Time";
 import Nat "mo:core/Nat";
 import Principal "mo:core/Principal";
+import Text "mo:core/Text";
 import Types "../types";
-import DigitalEncryption "DigitalEncryption";
+import DigitalDeliveryLib "DigitalDelivery";
 import CategoryCatalog "CategoryCatalog";
 import Int "mo:core/Int";
 import Order "mo:core/Order";
@@ -21,8 +22,8 @@ module {
   let MAX_DESC_LEN        : Nat = 5_000;
   let MAX_PHOTOS          : Nat = 10;
   let MAX_PAGE_SIZE       : Nat = 50;
-  let THIRTY_DAYS_NS      : Int = 2_592_000_000_000_000;
-  let SPAM_COOLDOWN_NS    : Int = 60_000_000_000;
+  let THIRTY_DAYS_NS      : Nat = 2_592_000_000_000_000;
+  let SPAM_COOLDOWN_NS    : Nat = 60_000_000_000;
   /// Max price in token units: $1,000,000 × 1,000,000 micro-units (6 decimals)
   let MAX_PRICE           : Nat = 1_000_000_000_000;
   let MAX_LOCATION_LEN    : Nat = 200;
@@ -72,13 +73,95 @@ module {
     else null;
   };
 
-  func validateDigital(isDigital : Bool, digitalFileUrl : ?Text) : ?Types.Error {
+  func validateDigital(
+    isDigital : Bool,
+    digitalFileUrl : ?Text,
+    digitalPassword : ?Text,
+    digitalFileAsset : ?Types.DigitalFileAsset,
+  ) : ?Types.Error {
     if (isDigital) {
-      switch (digitalFileUrl) {
-        case (null)    { ?#invalid_input("Digital listings must have a digitalFileUrl") };
-        case (?url)    { if (url.size() == 0) ?#invalid_input("digitalFileUrl must not be empty") else null };
+      switch (digitalPassword) {
+        case (?pwd) {
+          if (pwd.size() > 0) {
+            return ?#invalid_input("Digital file passwords are disabled; upload an encrypted file instead");
+          };
+        };
+        case null {};
+      };
+      switch (digitalFileAsset) {
+        case (?_) null;
+        case null {
+          switch (digitalFileUrl) {
+            case (null) null; // draft — registerDigitalFile / publish enforces
+            case (?url) {
+              if (url.size() == 0) null
+              else ?#invalid_input("Legacy digitalFileUrl is disabled; use registerDigitalFile")
+            };
+          };
+        };
       };
     } else null;
+  };
+
+  /// Publish / activate gate — digital listings must have uploaded file metadata.
+  public func assertDigitalReadyForPublish(listing : Types.Listing) : ?Types.Error {
+    if (listing.isDigital and not DigitalDeliveryLib.hasDigitalFulfillment(listing)) {
+      ?#invalid_input("Digital listing requires an uploaded file before publish")
+    } else null
+  };
+
+  func attrValue(attrs : [Types.CategoryAttributeValue], key : Text) : ?Text {
+    for (a in attrs.vals()) {
+      if (a.key == key) return ?a.value;
+    };
+    null
+  };
+
+  func parseNatText(t : Text) : ?Nat {
+    if (t.size() == 0) return null;
+    var n : Nat = 0;
+    for (ch in t.chars()) {
+      let code = ch.toNat32();
+      if (code < 48 or code > 57) return null;
+      n := n * 10 + (code - 48).toNat();
+    };
+    ?n
+  };
+
+  func validateAttributes(
+    categoryId : Types.CategoryId,
+    attributes : [Types.CategoryAttributeValue],
+  ) : ?Types.Error {
+    let schema = CategoryCatalog.attributeSchema(categoryId);
+    if (schema.size() == 0) return null;
+    for (field in schema.vals()) {
+      switch (attrValue(attributes, field.key)) {
+        case null {
+          if (field.required) {
+            return ?#invalid_input("Missing required attribute: " # field.key);
+          };
+        };
+        case (?val) {
+          if (field.required and val.size() == 0) {
+            return ?#invalid_input("Missing required attribute: " # field.key);
+          };
+          switch (field.fieldType) {
+            case (#number) {
+              switch (parseNatText(val)) {
+                case null {
+                  if (val.size() > 0) {
+                    return ?#invalid_input("Invalid number for attribute: " # field.key);
+                  };
+                };
+                case (?_) {};
+              };
+            };
+            case (#text) {};
+          };
+        };
+      };
+    };
+    null
   };
 
   // ─── Create ───────────────────────────────────────────────────────────────
@@ -109,10 +192,11 @@ module {
     novaPoshtaConfig  : ?Types.NovaPoshtaConfig,
     ukrposhtaConfig   : ?Types.UkrposhtaConfig,
     meestConfig       : ?Types.MeestConfig,
+    attributes        : [Types.CategoryAttributeValue],
   ) : Types.Result<Types.ListingCard> {
 
     // Anti-spam: enforce 60-second cooldown per principal
-    let now : Types.Timestamp = Time.now();
+    let now : Types.Timestamp = Types.now();
     switch (spamTracker.get(caller)) {
       case (?lastAt) {
         if (now - lastAt < SPAM_COOLDOWN_NS)
@@ -127,10 +211,15 @@ module {
     switch (validatePrice(priceAmount)) { case (?e) return #err(e); case null {} };
     switch (validatePhotos(photos))     { case (?e) return #err(e); case null {} };
     switch (validateLocation(location)) { case (?e) return #err(e); case null {} };
-    switch (validateDigital(isDigital, digitalFileUrl)) { case (?e) return #err(e); case null {} };
+    switch (validateDigital(isDigital, digitalFileUrl, digitalPassword, null)) { case (?e) return #err(e); case null {} };
+
+    let resolvedCategoryId = CategoryCatalog.resolveCategoryId(categoryId, category);
+    switch (validateAttributes(resolvedCategoryId, attributes)) {
+      case (?e) return #err(e);
+      case null {};
+    };
 
     let expiresAt : Types.Timestamp = now + THIRTY_DAYS_NS;
-    let resolvedCategoryId = CategoryCatalog.resolveCategoryId(categoryId, category);
     let resolvedCategory = CategoryCatalog.nodeLegacyCategory(resolvedCategoryId);
 
     let listing : Types.Listing = {
@@ -147,12 +236,13 @@ module {
       var location    = location;
       var shippingMethods = shippingMethods;
       isDigital       = isDigital;
-      var digitalFileUrl  = digitalFileUrl;
+      var digitalFileUrl  = if (isDigital) null else digitalFileUrl;
       var digitalFileHash = digitalFileHash;
-      var digitalPassword = digitalPassword;
+      var digitalPassword = null;
       var digitalFileUrlEncrypted  = null;
       var digitalPasswordEncrypted = null;
-      var status      = #active;
+      var digitalFileAsset         = null;
+      var status      = #draft;
       createdAt       = now;
       var expiresAt   = expiresAt;
       var viewCount   = 0;
@@ -163,25 +253,10 @@ module {
       var resolvedAt       = null;
       var bumpedAt         = 0 : Types.Timestamp;
       var promotedUntil    = null;
+      var attributes       = attributes;
     };
 
-    // Encrypt digital goods fields if this is a digital listing
-    if (isDigital) {
-      let salt = nextId.toText();
-      let key  = DigitalEncryption.deriveKey(canisterId, salt);
-      switch (digitalFileUrl) {
-        case (?url) {
-          listing.digitalFileUrlEncrypted := ?DigitalEncryption.encryptText(key, url);
-        };
-        case null {};
-      };
-      switch (digitalPassword) {
-        case (?pwd) {
-          listing.digitalPasswordEncrypted := ?DigitalEncryption.encryptText(key, pwd);
-        };
-        case null {};
-      };
-    };
+    ignore canisterId;
 
     listings.add(nextId, listing);
     spamTracker.add(caller, now);
@@ -197,6 +272,7 @@ module {
   /// Updates mutable fields of a listing. Owner-only.
   public func updateListing(
     listings        : Map.Map<Types.ListingId, Types.Listing>,
+    trades          : Map.Map<Types.TradeId, Types.Trade>,
     caller          : Types.UserId,
     id              : Types.ListingId,
     title           : Text,
@@ -216,6 +292,7 @@ module {
     novaPoshtaConfig  : ?Types.NovaPoshtaConfig,
     ukrposhtaConfig   : ?Types.UkrposhtaConfig,
     meestConfig       : ?Types.MeestConfig,
+    attributes        : [Types.CategoryAttributeValue],
   ) : Types.Result<()> {
     switch (listings.get(id)) {
       case null { #err(#not_found) };
@@ -228,10 +305,53 @@ module {
         switch (validatePrice(priceAmount))       { case (?e) return #err(e); case null {} };
         switch (validatePhotos(photos))           { case (?e) return #err(e); case null {} };
         switch (validateLocation(location))       { case (?e) return #err(e); case null {} };
-        switch (validateDigital(listing.isDigital, digitalFileUrl)) { case (?e) return #err(e); case null {} };
+        switch (validateDigital(listing.isDigital, digitalFileUrl, digitalPassword, listing.digitalFileAsset)) {
+          case (?e) return #err(e); case null {}
+        };
 
         let resolvedCategoryId = CategoryCatalog.resolveCategoryId(categoryId, category);
+        switch (validateAttributes(resolvedCategoryId, attributes)) {
+          case (?e) return #err(e);
+          case null {};
+        };
         let resolvedCategory = CategoryCatalog.nodeLegacyCategory(resolvedCategoryId);
+
+        // E2.S11 — validate file replacement before mutating listing state.
+        if (listing.isDigital) {
+          switch (digitalFileUrl, digitalFileHash) {
+            case (?newUrl, _) {
+              let urlChanged = switch (listing.digitalFileAsset) {
+                case (?_) true;
+                case null {
+                  switch (listing.digitalFileUrl) {
+                    case (?old) not Text.equal(old, newUrl);
+                    case null true;
+                  };
+                };
+              };
+              if (urlChanged) {
+                switch (DigitalDeliveryLib.assertCanReplaceFile(trades, id)) {
+                  case (#err(e)) return #err(e);
+                  case (#ok(_)) {};
+                };
+              };
+            };
+            case (null, ?newHash) {
+              switch (listing.digitalFileHash) {
+                case (?old) {
+                  if (not Text.equal(old, newHash)) {
+                    switch (DigitalDeliveryLib.assertCanReplaceFile(trades, id)) {
+                      case (#err(e)) return #err(e);
+                      case (#ok(_)) {};
+                    };
+                  };
+                };
+                case null {};
+              };
+            };
+            case (null, null) {};
+          };
+        };
 
         listing.title          := title;
         listing.description    := description;
@@ -243,9 +363,10 @@ module {
         listing.photos         := photos;
         listing.location       := location;
         listing.shippingMethods := shippingMethods;
-        listing.digitalFileUrl := digitalFileUrl;
+        listing.attributes     := attributes;
+        listing.digitalFileUrl := if (listing.isDigital) null else digitalFileUrl;
         listing.digitalFileHash := digitalFileHash;
-        listing.digitalPassword := digitalPassword;
+        listing.digitalPassword := null;
         // Only update shipping fields if provided; preserve existing values otherwise
         switch (packageDetails)   { case (?pd) { listing.packageDetails   := ?pd }; case null {} };
         switch (novaPoshtaConfig) { case (?nc) { listing.novaPoshtaConfig := ?nc }; case null {} };
@@ -269,7 +390,7 @@ module {
       case (?listing) {
         if (not Principal.equal(listing.seller, caller)) return #err(#unauthorized);
         listing.status     := #inactive;
-        listing.resolvedAt := ?Time.now();
+        listing.resolvedAt := ?Types.now();
         #ok(())
       };
     };
@@ -288,8 +409,12 @@ module {
       case (?listing) {
         if (not Principal.equal(listing.seller, caller)) return #err(#unauthorized);
         if (listing.status != #inactive) return #err(#invalid_input("Listing is not inactive"));
+        switch (assertDigitalReadyForPublish(listing)) {
+          case (?e) return #err(e);
+          case null {};
+        };
         listing.status    := #active;
-        listing.expiresAt := Time.now() + THIRTY_DAYS_NS;
+        listing.expiresAt := Types.now() + THIRTY_DAYS_NS;
         listing.resolvedAt := null;
         #ok(())
       };
@@ -317,6 +442,16 @@ module {
     }
   };
 
+  /// Public listing cards must never expose uploaded file blob URLs (E2.S11 AC 5).
+  func publicDigitalFileUrl(l : Types.Listing) : Text {
+    switch (l.digitalFileAsset) {
+      case (?_) "";
+      case null {
+        switch (l.digitalFileUrl) { case (?url) url; case null "" };
+      };
+    }
+  };
+
   /// Converts a Listing to a ListingCard with anonymous seller info.
   /// Mixin enriches with real seller data from user map.
   public func toListingCardAnon(l : Types.Listing, now : Types.Timestamp) : Types.ListingCard {
@@ -340,9 +475,11 @@ module {
         case (?n) n.slug;
         case null "";
       };
+      status           = l.status;
       createdAt        = l.createdAt;
-      digitalFileUrl   = switch (l.digitalFileUrl) { case (?url) url; case null "" };
+      digitalFileUrl   = publicDigitalFileUrl(l);
       isPromoted       = isPromotedNow(l, now);
+      attributes       = l.attributes;
     }
   };
 
@@ -357,7 +494,7 @@ module {
       photos           = l.photos;
       location         = l.location;
       sellerUsername   = seller.username;
-      sellerRating     = seller.reputationScore;
+      sellerRating     = seller.sellerScore;
       sellerTrustLevel = seller.trustLevel;
       sellerPrincipal  = seller.id;
       condition        = l.condition;
@@ -368,9 +505,11 @@ module {
         case (?n) n.slug;
         case null "";
       };
+      status           = l.status;
       createdAt        = l.createdAt;
-      digitalFileUrl   = switch (l.digitalFileUrl) { case (?url) url; case null "" };
+      digitalFileUrl   = publicDigitalFileUrl(l);
       isPromoted       = isPromotedNow(l, now);
+      attributes       = l.attributes;
     }
   };
 
@@ -388,6 +527,10 @@ module {
     priceToken     : ?Types.TradeToken;
     offset         : Nat;
     limit          : Nat;
+  };
+
+  public func listingMatchesSearch(l : Types.Listing, p : SearchParams) : Bool {
+    matchesSearch(l, p)
   };
 
   func matchesSearch(l : Types.Listing, p : SearchParams) : Bool {
@@ -465,7 +608,7 @@ module {
   ) : [Types.Listing] {
     let effectiveLimit = if (params.limit > MAX_PAGE_SIZE) MAX_PAGE_SIZE else params.limit;
 
-    let now = Time.now();
+    let now = Types.now();
     let allMatched = listings.entries()
       .filter(func(kv : (Types.ListingId, Types.Listing)) : Bool {
         let (_, l) = kv; matchesSearch(l, params)
@@ -509,6 +652,28 @@ module {
       .toArray()
   };
 
+  /// Returns active listings only for public seller profile views.
+  public func getPublicListingsByUser(
+    listings : Map.Map<Types.ListingId, Types.Listing>,
+    userId   : Types.UserId,
+    offset   : Nat,
+    limit    : Nat,
+  ) : [Types.Listing] {
+    let effectiveLimit = if (limit > MAX_PAGE_SIZE) MAX_PAGE_SIZE else limit;
+
+    listings.entries()
+      .filter(func(kv : (Types.ListingId, Types.Listing)) : Bool {
+        let (_, l) = kv;
+        Principal.equal(l.seller, userId) and l.status == #active
+      })
+      .map(func(kv : (Types.ListingId, Types.Listing)) : Types.Listing {
+        let (_, l) = kv; l
+      })
+      .drop(offset)
+      .take(effectiveLimit)
+      .toArray()
+  };
+
   // ─── Expiry ───────────────────────────────────────────────────────────────
 
   /// Marks all active listings past their expiresAt as #inactive.
@@ -516,7 +681,7 @@ module {
   public func markExpired(
     listings : Map.Map<Types.ListingId, Types.Listing>,
   ) : Nat {
-    let now = Time.now();
+    let now = Types.now();
     var count : Nat = 0;
     listings.entries().forEach(func(kv : (Types.ListingId, Types.Listing)) {
       let (_, l) = kv;
@@ -551,7 +716,7 @@ module {
     offset   : Nat,
     limit    : Nat,
   ) : [Types.Listing] {
-    let now = Time.now();
+    let now = Types.now();
     let effectiveLimit = if (limit > MAX_PAGE_SIZE) MAX_PAGE_SIZE else limit;
 
     listings.entries()
@@ -574,7 +739,7 @@ module {
   public func getResolvedForCleanup(
     listings : Map.Map<Types.ListingId, Types.Listing>,
   ) : [(Types.ListingId, Types.Listing)] {
-    let now    = Time.now();
+    let now    = Types.now();
     let cutoff = now - THIRTY_DAYS_NS;
     let results = List.empty<(Types.ListingId, Types.Listing)>();
     for ((lid, l) in listings.entries()) {

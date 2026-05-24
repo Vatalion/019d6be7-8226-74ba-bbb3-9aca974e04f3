@@ -89,73 +89,99 @@ export function ReputationStats({ stats, isLoading }: ReputationStatsProps) {
   const avgRating = stats?.averageRating ?? 0;
   const trustLevel = stats?.trustLevel ?? TrustLevel.new_;
   const disputeRate = stats?.disputeRate ?? 0;
+  const buyerScore = stats?.buyerScore != null ? Number(stats.buyerScore) : 0;
+  const sellerScore =
+    stats?.sellerScore != null ? Number(stats.sellerScore) : 0;
 
   return (
-    <div
-      className="grid grid-cols-2 sm:grid-cols-4 gap-3"
-      data-ocid="reputation-stats"
-    >
-      {/* Completed Trades */}
-      <div className="card-elevated p-4 flex flex-col gap-2">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
-          <TrendingUp className="h-3.5 w-3.5" />
-          {t("reputation.completedTrades")}
-        </div>
-        <p
-          className="text-2xl font-bold text-foreground"
-          data-ocid="stat-trades"
-        >
-          {completedTrades}
-        </p>
-      </div>
-
-      {/* Average Rating */}
-      <div className="card-elevated p-4 flex flex-col gap-2">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
-          <Star className="h-3.5 w-3.5" />
-          {t("reputation.averageRating")}
-        </div>
-        <div className="flex flex-col gap-1" data-ocid="stat-rating">
-          <p className="text-2xl font-bold text-foreground">
-            {avgRating.toFixed(1)}
+    <div className="space-y-3" data-ocid="reputation-stats">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {/* Completed Trades */}
+        <div className="card-elevated p-4 flex flex-col gap-2">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
+            <TrendingUp className="h-3.5 w-3.5" />
+            {t("reputation.completedTrades")}
+          </div>
+          <p
+            className="text-2xl font-bold text-foreground"
+            data-ocid="stat-trades"
+          >
+            {completedTrades}
           </p>
-          <StarRating
-            value={avgRating}
-            ariaLabel={t("reputation.ratingAriaLabel").replace(
-              "{value}",
-              avgRating.toFixed(1),
-            )}
-          />
+        </div>
+
+        {/* Average Rating */}
+        <div className="card-elevated p-4 flex flex-col gap-2">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
+            <Star className="h-3.5 w-3.5" />
+            {t("reputation.averageRating")}
+          </div>
+          <div className="flex flex-col gap-1" data-ocid="stat-rating">
+            <p className="text-2xl font-bold text-foreground">
+              {avgRating.toFixed(1)}
+            </p>
+            <StarRating
+              value={avgRating}
+              ariaLabel={t("reputation.ratingAriaLabel").replace(
+                "{value}",
+                avgRating.toFixed(1),
+              )}
+            />
+          </div>
+        </div>
+
+        {/* Trust Level */}
+        <div className="card-elevated p-4 flex flex-col gap-2">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            {t("reputation.trustLevel")}
+          </div>
+          <div className="flex items-center" data-ocid="stat-trust">
+            <span className={`${trustLevelClass(trustLevel)} text-sm`}>
+              {trustLevelLabel(trustLevel)}
+            </span>
+          </div>
+        </div>
+
+        {/* Dispute Rate */}
+        <div className="card-elevated p-4 flex flex-col gap-2">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            {t("reputation.disputeRate")}
+          </div>
+          <p
+            className={`text-2xl font-bold ${
+              disputeRate > 5 ? "text-destructive" : "text-foreground"
+            }`}
+            data-ocid="stat-dispute-rate"
+          >
+            {disputeRate.toFixed(1)}%
+          </p>
         </div>
       </div>
-
-      {/* Trust Level */}
-      <div className="card-elevated p-4 flex flex-col gap-2">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
-          <ShieldCheck className="h-3.5 w-3.5" />
-          {t("reputation.trustLevel")}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="card-elevated p-4 flex flex-col gap-2">
+          <p className="text-xs text-muted-foreground font-medium">
+            {t("reputation.buyerScore")}
+          </p>
+          <p
+            className="text-2xl font-bold text-foreground"
+            data-ocid="stat-buyer-score"
+          >
+            {buyerScore}
+          </p>
         </div>
-        <div className="flex items-center" data-ocid="stat-trust">
-          <span className={`${trustLevelClass(trustLevel)} text-sm`}>
-            {trustLevelLabel(trustLevel)}
-          </span>
+        <div className="card-elevated p-4 flex flex-col gap-2">
+          <p className="text-xs text-muted-foreground font-medium">
+            {t("reputation.sellerScore")}
+          </p>
+          <p
+            className="text-2xl font-bold text-foreground"
+            data-ocid="stat-seller-score"
+          >
+            {sellerScore}
+          </p>
         </div>
-      </div>
-
-      {/* Dispute Rate */}
-      <div className="card-elevated p-4 flex flex-col gap-2">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
-          <AlertTriangle className="h-3.5 w-3.5" />
-          {t("reputation.disputeRate")}
-        </div>
-        <p
-          className={`text-2xl font-bold ${
-            disputeRate > 5 ? "text-destructive" : "text-foreground"
-          }`}
-          data-ocid="stat-dispute-rate"
-        >
-          {disputeRate.toFixed(1)}%
-        </p>
       </div>
     </div>
   );

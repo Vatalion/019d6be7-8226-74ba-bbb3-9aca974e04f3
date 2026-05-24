@@ -1,0 +1,1 @@
+import{n as a,ad as s}from"./index-C2UQDM3B.js";const t=a.nova_poshta;a.self_pickup,a.ukrposhta,a.meest;const i={costNat:0n};function p(){return[{carrier:t,type:s.standard,estimatedDays:3n}]}export{t as A,i as N,p as g};

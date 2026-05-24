@@ -40,7 +40,7 @@ module {
       tradeId;
       amount;
       token;
-      recordedAt = Time.now();
+      recordedAt = Types.now();
     };
     fees.add(tradeId, rec);
   };
@@ -86,7 +86,7 @@ module {
       proposalId;
       recipient;
       amount;
-      executedAt = Time.now();
+      executedAt = Types.now();
     };
     withdrawals.add(rec);
     nextId + 1

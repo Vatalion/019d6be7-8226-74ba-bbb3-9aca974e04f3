@@ -4,6 +4,7 @@ import Nat "mo:core/Nat";
 import Principal "mo:core/Principal";
 import Time "mo:core/Time";
 import Array "mo:core/Array";
+import Int "mo:core/Int";
 
 module {
 
@@ -18,55 +19,417 @@ module {
   let TIER_2_THRESHOLD : Int = 50;
   let TIER_3_THRESHOLD : Int = 200;
 
-  /// Returns the maximum trade amount (in USD cents) allowed for a user
-  /// based on their reputation score.
-  public func maxTradeAmount(reputationScore : Int) : Nat {
-    if (reputationScore < TIER_2_THRESHOLD) {
+  /// Block trades/listings when liability debt exceeds this (USD cents).
+  public let LIABILITY_BLOCK_THRESHOLD : Int = 10_000; // $100
+
+  /// Returns true when user must not initiate trades due to global liability.
+  public func isTradeBlocked(user : Types.User) : Bool {
+    user.liabilityBalance < 0 and Int.abs(user.liabilityBalance) > LIABILITY_BLOCK_THRESHOLD
+  };
+
+  public func tradeBlockedError() : Text {
+    "Your account has outstanding liability. Please settle before trading."
+  };
+
+  /// UA block message citing the primary liability ID (AC4).
+  public func tradeBlockedErrorUa(
+    user : Types.User,
+    records : Map.Map<Nat, Types.LiabilityRecord>,
+  ) : Text {
+    if (not isTradeBlocked(user)) {
+      return tradeBlockedError();
+    };
+    switch (primaryBlockingLiabilityId(user.id, records)) {
+      case (?id) {
+        "Ваш акаунт заблоковано через заборгованість №" # id.toText() #
+        ". Будь ласка, погасіть борг перед торгівлею."
+      };
+      case null tradeBlockedError();
+    };
+  };
+
+  public func liabilityRecordView(rec : Types.LiabilityRecord) : Types.LiabilityRecordView {
+    {
+      id = rec.id;
+      userId = rec.userId;
+      originalAmount = rec.originalAmount;
+      remainingBalance = rec.remainingBalance;
+      currency = rec.currency;
+      reason = rec.reason;
+      initiator = rec.initiator;
+      tradeId = rec.tradeId;
+      status = rec.status;
+      createdAt = rec.createdAt;
+      updatedAt = rec.updatedAt;
+      auditTrail = rec.auditTrail;
+    }
+  };
+
+  func compareLiabilityAdmin(
+    a : Types.LiabilityRecordView,
+    b : Types.LiabilityRecordView,
+  ) : { #less; #equal; #greater } {
+    if (a.remainingBalance > b.remainingBalance) { #less }
+    else if (a.remainingBalance < b.remainingBalance) { #greater }
+    else if (a.createdAt < b.createdAt) { #less }
+    else if (a.createdAt > b.createdAt) { #greater }
+    else { #equal }
+  };
+
+  /// Open/partial liabilities sorted by severity (balance desc) then age (oldest first).
+  public func sortedLiabilitiesForAdmin(
+    records : Map.Map<Nat, Types.LiabilityRecord>,
+  ) : [Types.LiabilityRecordView] {
+    let views = records.entries().filterMap(
+      func((_, rec) : (Nat, Types.LiabilityRecord)) : ?Types.LiabilityRecordView {
+        switch (rec.status) {
+          case (#open or #partial) { ?liabilityRecordView(rec) };
+          case (#cleared) { null };
+        }
+      },
+    ).toArray();
+    views.sort(compareLiabilityAdmin)
+  };
+
+  func primaryBlockingLiabilityId(
+    userId : Types.UserId,
+    records : Map.Map<Nat, Types.LiabilityRecord>,
+  ) : ?Nat {
+    var best : ?Types.LiabilityRecord = null;
+    for ((_, rec) in records.entries()) {
+      if (Principal.equal(rec.userId, userId)) {
+        switch (rec.status) {
+          case (#open or #partial) {
+            switch (best) {
+              case null { best := ?rec };
+              case (?b) {
+                if (rec.remainingBalance > b.remainingBalance) {
+                  best := ?rec
+                } else if (
+                  rec.remainingBalance == b.remainingBalance and rec.createdAt < b.createdAt
+                ) {
+                  best := ?rec
+                };
+              };
+            };
+          };
+          case (#cleared) {};
+        };
+      };
+    };
+    switch (best) {
+      case (?rec) ?rec.id;
+      case null null;
+    }
+  };
+
+  func reasonToText(reason : Types.LiabilityReason) : Text {
+    switch (reason) {
+      case (#dispute_lost) "dispute_lost";
+      case (#cancellation_fee) "cancellation_fee";
+      case (#seller_fault) "seller_fault";
+      case (#stake_seizure_residual) "stake_seizure_residual";
+      case (#buyer_cancel_compensation) "buyer_cancel_compensation";
+      case (#admin_adjustment) "admin_adjustment";
+    }
+  };
+
+  func appendAudit(
+    rec : Types.LiabilityRecord,
+    action : Types.LiabilityAuditAction,
+    amount : Nat,
+    performedBy : Principal,
+    note : Text,
+  ) {
+    let entry : Types.LiabilityAuditEntry = {
+      action;
+      amount;
+      performedBy;
+      note;
+      timestamp = Types.now();
+    };
+    rec.auditTrail := rec.auditTrail.concat([entry]);
+    rec.updatedAt := entry.timestamp;
+  };
+
+  func syncUserBalanceFromRecords(
+    user : Types.User,
+    records : Map.Map<Nat, Types.LiabilityRecord>,
+  ) {
+    var owed : Nat = 0;
+    for ((_, rec) in records.entries()) {
+      if (Principal.equal(rec.userId, user.id)) {
+        switch (rec.status) {
+          case (#open or #partial) { owed += rec.remainingBalance };
+          case (#cleared) {};
+        };
+      };
+    };
+    user.liabilityBalance := -Int.fromNat(owed);
+  };
+
+  /// Creates a global liability record with unique ID (AC1).
+  public func createLiability(
+    records : Map.Map<Nat, Types.LiabilityRecord>,
+    nextId : { var value : Nat },
+    user : Types.User,
+    amountCents : Nat,
+    currency : Types.TradeToken,
+    reason : Types.LiabilityReason,
+    initiator : Principal,
+    tradeId : ?Types.TradeId,
+  ) : Nat {
+    let id = nextId.value;
+    nextId.value += 1;
+    let now = Types.now();
+    let rec : Types.LiabilityRecord = {
+      id;
+      userId = user.id;
+      var originalAmount = amountCents;
+      var remainingBalance = amountCents;
+      currency;
+      reason;
+      initiator;
+      tradeId;
+      var status = #open;
+      createdAt = now;
+      var updatedAt = now;
+      var auditTrail = [{
+        action = #created;
+        amount = amountCents;
+        performedBy = initiator;
+        note = "Liability created";
+        timestamp = now;
+      }];
+    };
+    records.add(id, rec);
+
+    let event : Types.LiabilityEvent = {
+      liabilityId = id;
+      amount = Int.fromNat(amountCents);
+      reason = reasonToText(reason);
+      tradeId = switch (tradeId) { case null 0; case (?t) t };
+      timestamp = now;
+    };
+    user.liabilityBalance := user.liabilityBalance - Int.fromNat(amountCents);
+    user.liabilityHistory := user.liabilityHistory.concat([event]);
+    id
+  };
+
+  /// Applies stake seizure against a liability — partial status when residual > 0 (AC2).
+  public func applyStakeSeizure(
+    records : Map.Map<Nat, Types.LiabilityRecord>,
+    user : Types.User,
+    liabilityId : Nat,
+    seizedCents : Nat,
+    performedBy : Principal,
+  ) : Types.Result<()> {
+    switch (records.get(liabilityId)) {
+      case null { #err(#not_found) };
+      case (?rec) {
+        if (not Principal.equal(rec.userId, user.id)) {
+          return #err(#invalid_input("Liability does not belong to user"));
+        };
+        switch (rec.status) {
+          case (#cleared) {
+            return #err(#invalid_input("Liability already cleared"));
+          };
+          case (#open or #partial) {};
+        };
+        if (seizedCents == 0) { return #ok(()) };
+        let applied = Nat.min(seizedCents, rec.remainingBalance);
+        rec.remainingBalance -= applied;
+        user.liabilityBalance := user.liabilityBalance + Int.fromNat(applied);
+        appendAudit(rec, #stake_applied, applied, performedBy, "Stake seizure applied");
+
+        let histEvent : Types.LiabilityEvent = {
+          liabilityId = liabilityId;
+          amount = -Int.fromNat(applied);
+          reason = "stake_seizure";
+          tradeId = switch (rec.tradeId) { case null 0; case (?t) t };
+          timestamp = Types.now();
+        };
+        user.liabilityHistory := user.liabilityHistory.concat([histEvent]);
+
+        rec.status := if (rec.remainingBalance == 0) { #cleared } else { #partial };
+        #ok(())
+      };
+    }
+  };
+
+  /// Admin partial clear with audit trail (AC3).
+  public func partialClearLiability(
+    records : Map.Map<Nat, Types.LiabilityRecord>,
+    user : Types.User,
+    liabilityId : Nat,
+    clearAmountCents : Nat,
+    admin : Principal,
+    note : Text,
+  ) : Types.Result<()> {
+    switch (records.get(liabilityId)) {
+      case null { #err(#not_found) };
+      case (?rec) {
+        if (not Principal.equal(rec.userId, user.id)) {
+          return #err(#invalid_input("Liability does not belong to user"));
+        };
+        switch (rec.status) {
+          case (#cleared) {
+            return #err(#invalid_input("Liability already cleared"));
+          };
+          case (#open or #partial) {};
+        };
+        if (clearAmountCents == 0) {
+          return #err(#invalid_input("Clear amount must be positive"));
+        };
+        let applied = Nat.min(clearAmountCents, rec.remainingBalance);
+        rec.remainingBalance -= applied;
+        user.liabilityBalance := user.liabilityBalance + Int.fromNat(applied);
+        appendAudit(rec, #partial_clear, applied, admin, note);
+
+        let histEvent : Types.LiabilityEvent = {
+          liabilityId = liabilityId;
+          amount = -Int.fromNat(applied);
+          reason = "partial_clear: " # note;
+          tradeId = switch (rec.tradeId) { case null 0; case (?t) t };
+          timestamp = Types.now();
+        };
+        user.liabilityHistory := user.liabilityHistory.concat([histEvent]);
+
+        rec.status := if (rec.remainingBalance == 0) { #cleared } else { #partial };
+        #ok(())
+      };
+    }
+  };
+
+  /// Admin clears all open/partial liabilities for a user.
+  public func clearLiability(
+    records : Map.Map<Nat, Types.LiabilityRecord>,
+    user : Types.User,
+    admin : Principal,
+    reason : Text,
+  ) {
+    let now = Types.now();
+    var totalCleared : Nat = 0;
+    for ((_, rec) in records.entries()) {
+      if (Principal.equal(rec.userId, user.id)) {
+        switch (rec.status) {
+          case (#open or #partial) {
+            totalCleared += rec.remainingBalance;
+            appendAudit(rec, #full_clear, rec.remainingBalance, admin, reason);
+            rec.remainingBalance := 0;
+            rec.status := #cleared;
+          };
+          case (#cleared) {};
+        };
+      };
+    };
+    if (totalCleared > 0) {
+      user.liabilityBalance := user.liabilityBalance + Int.fromNat(totalCleared);
+      let event : Types.LiabilityEvent = {
+        liabilityId = 0;
+        amount = Int.fromNat(totalCleared);
+        reason = "Cleared: " # reason;
+        tradeId = 0;
+        timestamp = now;
+      };
+      user.liabilityHistory := user.liabilityHistory.concat([event]);
+    } else if (user.liabilityBalance != 0) {
+      let event : Types.LiabilityEvent = {
+        liabilityId = 0;
+        amount = -user.liabilityBalance;
+        reason = "Cleared: " # reason;
+        tradeId = 0;
+        timestamp = now;
+      };
+      user.liabilityBalance := 0;
+      user.liabilityHistory := user.liabilityHistory.concat([event]);
+    };
+  };
+
+  /// One-time migration: map legacy reputationScore to dual role scores.
+  public func ensureDualScores(user : Types.User) {
+    if (user.buyerScore == 0 and user.sellerScore == 0 and user.reputationScore != 0) {
+      user.buyerScore := user.reputationScore;
+      user.sellerScore := user.reputationScore;
+    };
+  };
+
+  /// Returns the maximum trade amount (in USD cents) for reputation + optional KYC tier.
+  public func maxTradeAmountForTier(reputationScore : Int, kycTier : Types.KycTier) : Nat {
+    let base = if (reputationScore < TIER_2_THRESHOLD) {
       TIER_1_MAX_USD_CENTS
     } else if (reputationScore < TIER_3_THRESHOLD) {
       TIER_2_MAX_USD_CENTS
     } else {
       TIER_3_MAX_USD_CENTS
+    };
+    switch (kycTier) {
+      case (#verified) base * 2;
+      case (#none) base;
     }
+  };
+
+  /// Returns the maximum trade amount (in USD cents) allowed for a user
+  /// based on their reputation score (no KYC boost).
+  public func maxTradeAmount(reputationScore : Int) : Nat {
+    maxTradeAmountForTier(reputationScore, #none)
+  };
+
+  /// Returns true if the user's reputation + KYC tier allows a trade of `usdCents` value.
+  public func canTradeAmountForUser(
+    reputationScore : Int,
+    kycTier : Types.KycTier,
+    usdCents : Nat,
+  ) : Bool {
+    usdCents <= maxTradeAmountForTier(reputationScore, kycTier)
   };
 
   /// Returns true if the user's reputation allows a trade of `usdCents` value.
   public func canTradeAmount(reputationScore : Int, usdCents : Nat) : Bool {
-    usdCents <= maxTradeAmount(reputationScore)
+    canTradeAmountForUser(reputationScore, #none, usdCents)
+  };
+
+  /// Returns a human-readable error message when a trade exceeds the reputation tier limit.
+  public func gateErrorForUser(
+    reputationScore : Int,
+    kycTier : Types.KycTier,
+    usdCents : Nat,
+  ) : Text {
+    let max = maxTradeAmountForTier(reputationScore, kycTier);
+    let maxDollars = max / 100;
+    let kycHint = switch (kycTier) {
+      case (#verified) "";
+      case (#none) " Optional verified tier doubles limits (admin-assigned).";
+    };
+    "Trade amount exceeds your reputation tier limit. " #
+    "Your max: $" # maxDollars.toText() # ". " #
+    "Build more reputation by completing trades to increase your limit." #
+    kycHint
   };
 
   /// Returns a human-readable error message when a trade exceeds the reputation tier limit.
   public func gateError(reputationScore : Int, usdCents : Nat) : Text {
-    let max = maxTradeAmount(reputationScore);
-    let maxDollars = max / 100;
-    "Trade amount exceeds your reputation tier limit. " #
-    "Your max: $" # maxDollars.toText() # ". " #
-    "Build more reputation by completing trades to increase your limit."
+    gateErrorForUser(reputationScore, #none, usdCents)
   };
 
-  // ─── Liability tracking ─────────────────────────────────────────────────────
+  // ─── Liability balance helpers ──────────────────────────────────────────────
 
-  /// Records a liability event against a user and updates their liability balance.
-  ///
-  /// Sign convention: `liabilityBalance` goes NEGATIVE when debt accumulates.
-  /// Passing `amount = 500` (e.g. $5.00 owed) will SUBTRACT 500 from `liabilityBalance`,
-  /// making it more negative.  A balance of -500 means the user owes $5.00.
-  ///
-  /// Callers (escrow-api.mo, disputes-api.mo) should pass the real trade amount in USD cents.
-  public func recordLiability(
-    user    : Types.User,
-    amount  : Int,
-    reason  : Text,
-    tradeId : ?Nat
+  /// Credit-only adjustment (e.g. buyer cancel compensation) — no new liability record.
+  public func recordLiabilityCredit(
+    user : Types.User,
+    creditCents : Nat,
+    reason : Text,
+    tradeId : ?Nat,
+    liabilityId : ?Nat,
   ) {
     let event : Types.LiabilityEvent = {
-      amount;
+      liabilityId = Types.optNat(liabilityId);
+      amount = -Int.fromNat(creditCents);
       reason;
-      tradeId;
-      timestamp = Time.now();
+      tradeId = Types.optNat(tradeId);
+      timestamp = Types.now();
     };
-    // Subtract amount so that positive `amount` → more negative balance (more debt)
-    user.liabilityBalance := user.liabilityBalance - amount;
+    user.liabilityBalance := user.liabilityBalance + Int.fromNat(creditCents);
     user.liabilityHistory := user.liabilityHistory.concat([event]);
   };
 
@@ -112,20 +475,34 @@ module {
   /// outcome: #complete | #refunded | #disputed_lost | #cancelled
   public func applyOutcome(
     user    : Types.User,
-    outcome : { #complete; #refunded; #disputed_lost; #cancelled }
+    outcome : { #complete; #refunded; #disputed_lost; #cancelled },
+    role    : { #buyer; #seller },
   ) {
+    ensureDualScores(user);
     switch outcome {
       case (#complete) {
         user.reputationScore := user.reputationScore + 10;
+        switch role {
+          case (#buyer) { user.buyerScore := user.buyerScore + 10 };
+          case (#seller) { user.sellerScore := user.sellerScore + 10 };
+        };
       };
       case (#refunded) {
         // refund = no score change (0 delta)
       };
       case (#disputed_lost) {
         user.reputationScore := user.reputationScore - 20;
+        switch role {
+          case (#buyer) { user.buyerScore := user.buyerScore - 20 };
+          case (#seller) { user.sellerScore := user.sellerScore - 20 };
+        };
       };
       case (#cancelled) {
         user.reputationScore := user.reputationScore - 5;
+        switch role {
+          case (#buyer) {};
+          case (#seller) { user.sellerScore := user.sellerScore - 5 };
+        };
       };
     };
   };
@@ -151,21 +528,21 @@ module {
       case (?buyer, ?seller) {
         switch tradeStatus {
           case (#complete) {
-            applyOutcome(buyer,  #complete);
-            applyOutcome(seller, #complete);
+            applyOutcome(buyer,  #complete, #buyer);
+            applyOutcome(seller, #complete, #seller);
           };
           case (#refunded) {
-            applyOutcome(buyer,  #refunded);
-            applyOutcome(seller, #refunded);
+            applyOutcome(buyer,  #refunded, #buyer);
+            applyOutcome(seller, #refunded, #seller);
           };
           case (#disputed) {
             switch disputeLoser {
               case (?loser) {
                 if (Principal.equal(loser, buyerId)) {
-                  applyOutcome(buyer,  #disputed_lost);
+                  applyOutcome(buyer,  #disputed_lost, #buyer);
                   // seller wins — no penalty
                 } else if (Principal.equal(loser, sellerId)) {
-                  applyOutcome(seller, #disputed_lost);
+                  applyOutcome(seller, #disputed_lost, #seller);
                   // buyer wins — no penalty
                 }
               };
@@ -174,7 +551,7 @@ module {
           };
           case (#cancelled) {
             // Only penalize the seller on cancellation (seller-initiated)
-            applyOutcome(seller, #cancelled);
+            applyOutcome(seller, #cancelled, #seller);
           };
           case (_) { /* pending/funded/buyer_confirmed — nothing to do */ };
         };
@@ -272,6 +649,8 @@ module {
     averageRating   : Float;
     trustLevel      : Types.TrustLevel;
     reputationScore : Int;
+    buyerScore      : Int;
+    sellerScore     : Int;
   };
 
   /// Computes aggregated reputation stats for a given user.
@@ -281,6 +660,7 @@ module {
     feedbacks : Map.Map<Types.FeedbackId, Types.Feedback>,
     user      : Types.User
   ) : ReputationStats {
+    ensureDualScores(user);
     var completed  : Nat   = 0;
     var disputed   : Nat   = 0;
     var ratingSum  : Nat   = 0;
@@ -325,6 +705,8 @@ module {
       averageRating   = averageRating;
       trustLevel      = user.trustLevel;
       reputationScore = user.reputationScore;
+      buyerScore      = user.buyerScore;
+      sellerScore     = user.sellerScore;
     }
   };
 }
